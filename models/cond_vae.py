@@ -365,7 +365,6 @@ class Cond_SRVAE(BaseVAE):
 
         z = mu_z_uy + eps * std
 
-        print(f"y shape: {y.shape}, u shape: {u.shape}, z shape: {z.shape}")
         return self.decode_x(z, y, u)
 
     def generation(self):
