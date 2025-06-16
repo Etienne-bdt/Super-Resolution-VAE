@@ -181,7 +181,6 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
                 f"Epoch {epoch}/{epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}"
             )
 
-        self.wandb_run.finish()
         return
 
     @abc.abstractmethod
@@ -314,7 +313,7 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
 
         plt.figure(figsize=(20, 10))
         plt.subplot(2, 4, 1)
-        plt.imshow(target[0, [2, 1, 0], :, :].cpu().numpy().transpose(1, 2, 0))
+        plt.imshow(pred[0, [2, 1, 0], :, :].cpu().numpy().transpose(1, 2, 0))
         plt.title("Input Image")
         plt.subplot(2, 4, 2)
         plt.imshow(samples[0, [2, 1, 0], :, :].cpu().numpy().transpose(1, 2, 0))
@@ -346,3 +345,21 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
         plt.close()
         MMSE = (samples - target).pow(2).mean()
         print(f"MMSE: {MMSE:.4f}")
+
+        if hasattr(self, "wandb_run") and self.wandb_run is not None:
+            self.wandb_run.log(
+                {
+                    "Metrics/MMSE": MMSE,
+                    "Plots/Error Maps": wandb.Image(
+                        f"{results_dir}/error_mean_std_maps.png"
+                    ),
+                },
+            )
+
+            self.wandb_run.finish()
+
+        else:
+            print("WandB run not initialized, skipping logging.")
+
+        print(f"Results saved to {results_dir}")
+        return results_dir
