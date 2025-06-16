@@ -324,6 +324,9 @@ class Cond_SRVAE(BaseVAE):
         mu_u, logvar_u = self.encode_y(y)
         u = self.reparameterize(mu_u, logvar_u)
 
+        y = self.y_to_z(y).view(y.size(0), -1)
+        u = self.u_to_z(u).view(u.size(0), -1)
+
         mu_z_uy, logvar_z_uy = self.z_cond(y, u)
         z = self.reparameterize(mu_z_uy, logvar_z_uy)
 
@@ -346,6 +349,8 @@ class Cond_SRVAE(BaseVAE):
             y = y.expand(u.size(0) - 1, -1, -1)
         elif y.ndim == 4 and y.size(0) == 1:
             y = y.expand(u.size(0), -1, -1, -1)
+        y = self.y_to_z(y).view(y.size(0), -1)
+        u = self.u_to_z(u).view(u.size(0), -1)
 
         mu_z_uy, logvar_z_uy = self.z_cond(y, u)
 
@@ -644,8 +649,8 @@ class Cond_SRVAE(BaseVAE):
             y.to(next(self.parameters()).device),
             x.to(next(self.parameters()).device),
         )
-        return y[14:15, :, :, :], x[
-            14:15, :, :, :
+        return y[7:8, :, :, :], x[
+            7:8, :, :, :
         ]  # Return a single sample for task evaluation
 
 
