@@ -7,7 +7,7 @@ import tifffile
 import torch
 from torch.utils.data import Dataset
 
-from utils import norm_and_copy_image_dynamics, normalize_image
+from utils import normalize_image
 
 
 def init_dataloader(dataset: str, batch_size: int = 16, patch_size: int = 256):
@@ -171,8 +171,8 @@ class Sen2VenDataset(Dataset):
             p2 = os.path.join(self.dataset, p2)
 
             # Load the images using rasterio
-            img1 = tifffile.imread(p1)
-            img2 = tifffile.imread(p2)
+            img1 = tifffile.imread(p1, ioworkers=6)
+            img2 = tifffile.imread(p2, ioworkers=6)
 
             img1 = torch.tensor(img1, dtype=torch.float32)
             img2 = torch.tensor(img2, dtype=torch.float32)
@@ -185,7 +185,8 @@ class Sen2VenDataset(Dataset):
                     img2 = self.grid_crop(img2, self.patch_size)
 
             # Normalize the images
-            img1, img2 = norm_and_copy_image_dynamics(img1, img2)
+            img1 = img1 / 10000
+            img2 = img2 / 10000
 
             return img1, img2
 
@@ -285,11 +286,35 @@ if __name__ == "__main__":
             img1, img2 = img1[0], img2[0]
         print(f"Image 1 shape: {img1.shape}, Image 2 shape: {img2.shape}")
         plt.imsave(
-            f"img1_{i}.png", img1[[2, 1, 0], :, :].permute(1, 2, 0).numpy().clip(0, 1)
+            f"img1_{i}.png",
+            (img1[[2, 1, 0], :, :] / 2**16).permute(1, 2, 0).numpy(),
         )
         plt.imsave(
-            f"img2_{i}.png", img2[[2, 1, 0], :, :].permute(1, 2, 0).numpy().clip(0, 1)
+            f"img2_{i}.png",
+            (img2[[2, 1, 0], :, :] / 2**16).permute(1, 2, 0).numpy(),
         )
+
+    plt.figure()
+    plt.hist(img1[0].numpy().flatten(), bins=100, alpha=0.5, label="b1", color="blue")
+    plt.hist(img1[1].numpy().flatten(), bins=100, alpha=0.5, label="b2", color="green")
+    plt.hist(img1[2].numpy().flatten(), bins=100, alpha=0.5, label="b3", color="red")
+    plt.hist(img1[3].numpy().flatten(), bins=100, alpha=0.5, label="b4", color="orange")
+    plt.title("Histogram of bands in Venus")
+    plt.xlabel("Pixel value")
+    plt.ylabel("Frequency")
+    plt.legend()
+    plt.savefig("histogram_sen2.png")
+
+    plt.figure()
+    plt.hist(img2[0].numpy().flatten(), bins=100, alpha=0.5, label="b1", color="blue")
+    plt.hist(img2[1].numpy().flatten(), bins=100, alpha=0.5, label="b2", color="green")
+    plt.hist(img2[2].numpy().flatten(), bins=100, alpha=0.5, label="b3", color="red")
+    plt.hist(img2[3].numpy().flatten(), bins=100, alpha=0.5, label="b4", color="orange")
+    plt.title("Histogram of bands in Venus")
+    plt.xlabel("Pixel value")
+    plt.ylabel("Frequency")
+    plt.legend()
+    plt.savefig("histogram_venus.png")
 
     train_loader, val_loader = init_dataloader(
         "Sen2Venus", batch_size=16, patch_size=64
