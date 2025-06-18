@@ -1,3 +1,5 @@
+from typing import Tuple
+
 import torch
 
 
@@ -53,6 +55,25 @@ def norm_and_copy_image_dynamics(source: torch.Tensor, target: torch.Tensor):
         ) + normalized_source.mean(dim=(2, 3), keepdim=True)
 
     return normalized_source, target
+
+
+def get_contrast(image: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Get the minimum and maximum pixel values of the image tensor.
+    Args:
+        image (torch.Tensor): Input image tensor.
+    Returns:
+        tuple: Minimum and maximum pixel values of the image.
+    """
+    if image.ndim == 3:
+        min_val = image.amin(dim=(1, 2))
+        max_val = image.amax(dim=(1, 2))
+    elif image.ndim == 4:
+        min_val = image.amin(dim=(2, 3))
+        max_val = image.amax(dim=(2, 3))
+    else:
+        raise ValueError("Input image must be 3D or 4D tensor.")
+    return (min_val, max_val)
 
 
 class EarlyStopper:

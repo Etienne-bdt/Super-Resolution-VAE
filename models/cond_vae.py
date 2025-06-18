@@ -7,6 +7,7 @@ from torch.nn import functional as F
 from tqdm import tqdm
 
 from loss import cond_loss
+from utils import get_contrast
 
 from .base import BaseVAE
 from .layers import down_block, up_block
@@ -555,15 +556,18 @@ class Cond_SRVAE(BaseVAE):
                 x_hat, y_hat, *_ = self.forward(x, y)
                 x_sr = self.conditional_generation(y)
 
+            gt_min, gt_max = get_contrast(x)
+
             imgs = {
-                "y": y[:4],
-                "x": x[:4],
-                "y_bicubic": F.interpolate(y, scale_factor=2, mode="bicubic")[
-                    :4
-                ],  # Bicubic interpolation for y
-                "y_hat": y_hat[:4],
-                "x_hat": x_hat[:4],
-                "x_sr": x_sr[:4],
+                "y": ((y[:4] - gt_min) / (gt_max - gt_min)),  # Normalize y
+                "x": ((x[:4] - gt_min) / (gt_max - gt_min)),
+                "y_bicubic": (
+                    (F.interpolate(y, scale_factor=2, mode="bicubic")[:4] - gt_min)
+                    / (gt_max - gt_min)
+                ),  # Bicubic interpolation for y
+                "y_hat": ((y_hat[:4] - gt_min) / (gt_max - gt_min)),
+                "x_hat": ((x_hat[:4] - gt_min) / (gt_max - gt_min)),
+                "x_sr": ((x_sr[:4] - gt_min) / (gt_max - gt_min)),
             }
 
         if epoch % 10 == 0 or epoch == 1:
