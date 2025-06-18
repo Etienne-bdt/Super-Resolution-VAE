@@ -33,7 +33,7 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
         self.slurm_job_id: str = slurm_job_id
         self.patch_size: int = patch_size
         self.callbacks: List[Callback] = callbacks
-        self.ssim = skmetrics.structural_similarity(data_range=1)
+        self.ssim = skmetrics.structural_similarity
         self.lpips_fn = lpips.LPIPS(net="alex")
         self.num_params: int = 0
 
