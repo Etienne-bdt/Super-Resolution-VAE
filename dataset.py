@@ -7,7 +7,7 @@ import tifffile
 import torch
 from torch.utils.data import Dataset
 
-from utils import normalize_image
+from utils import norm_and_copy_image_dynamics, normalize_image
 
 
 def init_dataloader(dataset: str, batch_size: int = 16, patch_size: int = 256):
@@ -185,8 +185,7 @@ class Sen2VenDataset(Dataset):
                     img2 = self.grid_crop(img2, self.patch_size)
 
             # Normalize the images
-            img1 = normalize_image(img1)
-            img2 = normalize_image(img2)
+            img1, img2 = norm_and_copy_image_dynamics(img1, img2)
 
             return img1, img2
 
@@ -286,12 +285,10 @@ if __name__ == "__main__":
             img1, img2 = img1[0], img2[0]
         print(f"Image 1 shape: {img1.shape}, Image 2 shape: {img2.shape}")
         plt.imsave(
-            f"img1_{i}.png",
-            img1[[2, 1, 0], :, :].permute(1, 2, 0).numpy(),
+            f"img1_{i}.png", img1[[2, 1, 0], :, :].permute(1, 2, 0).numpy().clip(0, 1)
         )
         plt.imsave(
-            f"img2_{i}.png",
-            img2[[2, 1, 0], :, :].permute(1, 2, 0).numpy(),
+            f"img2_{i}.png", img2[[2, 1, 0], :, :].permute(1, 2, 0).numpy().clip(0, 1)
         )
 
     train_loader, val_loader = init_dataloader(

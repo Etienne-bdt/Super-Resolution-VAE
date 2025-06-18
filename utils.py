@@ -10,7 +10,7 @@ def normalize_image(image: torch.Tensor) -> torch.Tensor:
         torch.Tensor: Normalized image tensor.
     """
     if image.ndim == 3:
-        # If the image is 3D (C, H, W), add a batch dimension
+        # If the image is 3D (C, H, W)
         min_val = image.amin(dim=(1, 2), keepdim=True)
         max_val = image.amax(dim=(1, 2), keepdim=True)
         normalized_image = (image - min_val) / (max_val - min_val + 1e-5)
@@ -21,6 +21,38 @@ def normalize_image(image: torch.Tensor) -> torch.Tensor:
     else:
         raise ValueError("Input image must be 3D or 4D tensor.")
     return normalized_image
+
+
+def norm_and_copy_image_dynamics(source: torch.Tensor, target: torch.Tensor):
+    """
+    Normalize the source image and copy it to the target tensor.
+    Args:
+        source (torch.Tensor): Source image tensor.
+        target (torch.Tensor): Target image tensor to copy normalized values into.
+    Returns:
+        torch.Tensor: Target tensor with normalized values from the source.
+    """
+    if source.ndim == 3:
+        # If the source is 3D (C, H, W)
+        min_val = source.amin(dim=(1, 2), keepdim=True)
+        max_val = source.amax(dim=(1, 2), keepdim=True)
+        normalized_source = (source - min_val) / (max_val - min_val + 1e-5)
+        target = (target - target.mean(dim=(1, 2), keepdim=True)) * (
+            normalized_source.std(dim=(1, 2), keepdim=True)
+            / target.std(dim=(1, 2), keepdim=True)
+        ) + normalized_source.mean(dim=(1, 2), keepdim=True)
+
+    elif source.ndim == 4:
+        # If the source is 4D (B, C, H, W)
+        min_val = source.amin(dim=(2, 3), keepdim=True)
+        max_val = source.amax(dim=(2, 3), keepdim=True)
+        normalized_source = (source - min_val) / (max_val - min_val + 1e-5)
+        target = (target - target.mean(dim=(2, 3), keepdim=True)) * (
+            normalized_source.std(dim=(2, 3), keepdim=True)
+            / target.std(dim=(2, 3), keepdim=True)
+        ) + normalized_source.mean(dim=(2, 3), keepdim=True)
+
+    return normalized_source, target
 
 
 class EarlyStopper:
