@@ -4,6 +4,7 @@
     "config:recommended"
   ],
   "ignoreDeps": [
-    "torch"
+    "torch",
+    "python"
   ]
 }
