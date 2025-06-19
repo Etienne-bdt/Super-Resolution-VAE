@@ -191,6 +191,7 @@ class VAE(BaseVAE):
             batch = next(iter(val_loader))
             x, _ = batch
             x = x.to(device)
+
             with torch.no_grad():
                 x_hat, _, _ = self.forward(x)
                 imgs_in = x[:4]

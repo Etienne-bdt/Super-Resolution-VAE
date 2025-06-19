@@ -7,7 +7,7 @@ import tifffile
 import torch
 from torch.utils.data import Dataset
 
-from utils import normalize_image
+from utils import get_contrast, normalize_image
 
 
 def init_dataloader(dataset: str, batch_size: int = 16, patch_size: int = 256):
@@ -171,11 +171,16 @@ class Sen2VenDataset(Dataset):
             p2 = os.path.join(self.dataset, p2)
 
             # Load the images using rasterio
-            img1 = tifffile.imread(p1)
-            img2 = tifffile.imread(p2)
+            img1 = tifffile.imread(p1, ioworkers=6)
+            img2 = tifffile.imread(p2, ioworkers=6)
 
             img1 = torch.tensor(img1, dtype=torch.float32)
             img2 = torch.tensor(img2, dtype=torch.float32)
+
+            min_img, max_img = get_contrast(img2)
+
+            img2 = (img2 - min_img) / (max_img - min_img + 1e-5)
+            img1 = (img1 - min_img) / (max_img - min_img + 1e-5)
 
             if self.transform:
                 if self.crop == "random":
@@ -183,10 +188,6 @@ class Sen2VenDataset(Dataset):
                 elif self.crop == "grid":
                     img1 = self.grid_crop(img1, self.patch_size // 2)
                     img2 = self.grid_crop(img2, self.patch_size)
-
-            # Normalize the images
-            img1 = normalize_image(img1)
-            img2 = normalize_image(img2)
 
             return img1, img2
 
@@ -278,7 +279,9 @@ if __name__ == "__main__":
     # Example usage
     ds = Sen2VenDataset(patch_size=64)
     print(f"Number of samples: {len(ds)}")
-    for i in range(5):
+    start = 15
+    end = start + 1
+    for i in range(start, end):
         img1, img2 = ds[i]
         if img1.ndim == 4:
             # If grid cropping is used, the images will have 4 dimensions instead of 3
@@ -287,12 +290,36 @@ if __name__ == "__main__":
         print(f"Image 1 shape: {img1.shape}, Image 2 shape: {img2.shape}")
         plt.imsave(
             f"img1_{i}.png",
-            img1[[2, 1, 0], :, :].permute(1, 2, 0).numpy(),
+            (img1[[2, 1, 0], :, :]).permute(1, 2, 0).numpy(),
         )
         plt.imsave(
             f"img2_{i}.png",
-            img2[[2, 1, 0], :, :].permute(1, 2, 0).numpy(),
+            (img2[[2, 1, 0], :, :]).permute(1, 2, 0).numpy(),
         )
+
+    plt.figure()
+    plt.hist(img1[0].numpy().flatten(), bins=100, alpha=0.5, label="b2", color="blue")
+    plt.hist(img1[1].numpy().flatten(), bins=100, alpha=0.5, label="b3", color="green")
+    plt.hist(img1[2].numpy().flatten(), bins=100, alpha=0.5, label="b4", color="red")
+    plt.hist(img1[3].numpy().flatten(), bins=100, alpha=0.5, label="b8", color="orange")
+    plt.title("Histogram of bands in Sentinel-2")
+    plt.xlabel("Pixel value")
+    plt.ylabel("Frequency")
+    plt.legend()
+    plt.savefig("histogram_sen2.png")
+
+    plt.figure()
+    plt.hist(img2[0].numpy().flatten(), bins=100, alpha=0.5, label="b3", color="blue")
+    plt.hist(img2[1].numpy().flatten(), bins=100, alpha=0.5, label="b4", color="green")
+    plt.hist(img2[2].numpy().flatten(), bins=100, alpha=0.5, label="b7", color="red")
+    plt.hist(
+        img2[3].numpy().flatten(), bins=100, alpha=0.5, label="b11", color="orange"
+    )
+    plt.title("Histogram of bands in Venus")
+    plt.xlabel("Pixel value")
+    plt.ylabel("Frequency")
+    plt.legend()
+    plt.savefig("histogram_venus.png")
 
     train_loader, val_loader = init_dataloader(
         "Sen2Venus", batch_size=16, patch_size=64
