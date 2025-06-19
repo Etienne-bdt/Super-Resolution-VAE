@@ -520,14 +520,14 @@ class Cond_SRVAE(BaseVAE):
 
                 if first:
                     imgs = {
-                        "y": y[:4, [2, 1, 0], :, :],
-                        "x": x[:4, [2, 1, 0], :, :],
+                        "y": y[:4, [2, 1, 0], :, :].clamp(0, 1),
+                        "x": x[:4, [2, 1, 0], :, :].clamp(0, 1),
                         "y_bicubic": F.interpolate(y, scale_factor=2, mode="bicubic")[
                             :4, [2, 1, 0], :, :
-                        ],  # Bicubic interpolation for y
-                        "y_hat": y_hat[:4, [2, 1, 0], :, :],
-                        "x_hat": x_hat[:4, [2, 1, 0], :, :],
-                        "x_sr": x_sr[:4, [2, 1, 0], :, :],
+                        ].clamp(0, 1),  # Bicubic interpolation for y
+                        "y_hat": y_hat[:4, [2, 1, 0], :, :].clamp(0, 1),
+                        "x_hat": x_hat[:4, [2, 1, 0], :, :].clamp(0, 1),
+                        "x_sr": x_sr[:4, [2, 1, 0], :, :].clamp(0, 1),
                     }
                     first = False
 
@@ -556,14 +556,14 @@ class Cond_SRVAE(BaseVAE):
                 x_sr = self.conditional_generation(y)
 
             imgs = {
-                "y": y[:4, [2, 1, 0], :, :],  # RGB channels
-                "x": x[:4, [2, 1, 0], :, :],
+                "y": y[:4, [2, 1, 0], :, :].clamp(0, 1),  # RGB channels
+                "x": x[:4, [2, 1, 0], :, :].clamp(0, 1),  # RGB channels
                 "y_bicubic": F.interpolate(y, scale_factor=2, mode="bicubic")[
                     :4, [2, 1, 0], :, :
-                ],  # Bicubic interpolation for y
-                "y_hat": y_hat[:4, [2, 1, 0], :, :],
-                "x_hat": x_hat[:4, [2, 1, 0], :, :],
-                "x_sr": x_sr[:4, [2, 1, 0], :, :],
+                ].clamp(0, 1),  # Bicubic interpolation for y
+                "y_hat": y_hat[:4, [2, 1, 0], :, :].clamp(0, 1),
+                "x_hat": x_hat[:4, [2, 1, 0], :, :].clamp(0, 1),
+                "x_sr": x_sr[:4, [2, 1, 0], :, :].clamp(0, 1),
             }
 
         if epoch % 10 == 0 or epoch == 1:
