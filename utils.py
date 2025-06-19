@@ -66,11 +66,11 @@ def get_contrast(image: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         tuple: Minimum and maximum pixel values of the image.
     """
     if image.ndim == 3:
-        min_val = image.amin(dim=(1, 2))
-        max_val = image.amax(dim=(1, 2))
+        min_val = image.amin(dim=(1, 2), keepdim=True)
+        max_val = image.amax(dim=(1, 2), keepdim=True)
     elif image.ndim == 4:
-        min_val = image.amin(dim=(2, 3))
-        max_val = image.amax(dim=(2, 3))
+        min_val = image.amin(dim=(2, 3), keepdim=True)
+        max_val = image.amax(dim=(2, 3), keepdim=True)
     else:
         raise ValueError("Input image must be 3D or 4D tensor.")
     return (min_val, max_val)

@@ -3,7 +3,6 @@ import torch.nn as nn
 import wandb
 
 from loss import base_loss
-from utils import get_contrast
 
 from .base import BaseVAE
 from .layers import down_block, up_block
@@ -193,11 +192,10 @@ class VAE(BaseVAE):
             x, _ = batch
             x = x.to(device)
 
-            gt_min, gt_max = get_contrast(x)
             with torch.no_grad():
                 x_hat, _, _ = self.forward(x)
-                imgs_in = (x[:4] - gt_min) / (gt_max - gt_min)
-                imgs_out = (x_hat[:4] - gt_min) / (gt_max - gt_min)
+                imgs_in = x[:4]
+                imgs_out = x_hat[:4]
 
         # log sample images
         if epoch % 5 == 0 or epoch == 1:
