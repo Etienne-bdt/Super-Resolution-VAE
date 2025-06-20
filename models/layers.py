@@ -250,8 +250,8 @@ class down_block(nn.Module):
         """
         inp = x
         x = self.conv(x)
-        if self.with_bn:
-            x = self.bn_in(x)
+        # if self.with_bn:
+        #    x = self.bn_in(x)
         if self.with_relu:
             x = self.relu(x)
         x = x + inp  # Residual connection
@@ -298,8 +298,8 @@ class up_block(nn.Module):
         """
         inp = x
         x = self.conv(x)
-        if self.with_bn:
-            x = self.bn_in(x)
+        # if self.with_bn:
+        #    x = self.bn_in(x)
         if self.with_relu:
             x = self.relu(x)
         x = x + inp  # Residual connection
