@@ -234,6 +234,7 @@ class down_block(nn.Module):
         self.downsample = nn.Conv2d(
             in_channels, out_channels, kernel_size=4, stride=2, padding=1
         )
+        self.bn_in = nn.BatchNorm2d(in_channels)
         self.bn = nn.BatchNorm2d(out_channels)
         self.relu = nn.ReLU()
 
@@ -247,7 +248,13 @@ class down_block(nn.Module):
         Returns:
             torch.Tensor: Output tensor of shape (batch_size, out_channels, new_height, new_width).
         """
+        inp = x
         x = self.conv(x)
+        if self.with_bn:
+            x = self.bn_in(x)
+        if self.with_relu:
+            x = self.relu(x)
+        x = x + inp  # Residual connection
         x = self.downsample(x)
         if self.with_bn:
             x = self.bn(x)
@@ -275,6 +282,7 @@ class up_block(nn.Module):
         self.upsample = nn.ConvTranspose2d(
             in_channels, out_channels, kernel_size=4, stride=2, padding=1
         )
+        self.bn_in = nn.BatchNorm2d(in_channels)
         self.bn = nn.BatchNorm2d(out_channels)
         self.relu = nn.ReLU()
 
@@ -288,7 +296,13 @@ class up_block(nn.Module):
         Returns:
             torch.Tensor: Output tensor of shape (batch_size, out_channels, new_height, new_width).
         """
+        inp = x
         x = self.conv(x)
+        if self.with_bn:
+            x = self.bn_in(x)
+        if self.with_relu:
+            x = self.relu(x)
+        x = x + inp  # Residual connection
         x = self.upsample(x)
         if self.with_bn:
             x = self.bn(x)
