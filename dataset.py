@@ -177,17 +177,17 @@ class Sen2VenDataset(Dataset):
             img1 = torch.tensor(img1, dtype=torch.float32)
             img2 = torch.tensor(img2, dtype=torch.float32)
 
-            min_img, max_img = get_contrast(img2)
-
-            img2 = (img2 - min_img) / (max_img - min_img + 1e-5)
-            img1 = (img1 - min_img) / (max_img - min_img + 1e-5)
-
             if self.transform:
                 if self.crop == "random":
                     img1, img2 = self.sr_randomcrop(img1, img2)
                 elif self.crop == "grid":
                     img1 = self.grid_crop(img1, self.patch_size // 2)
                     img2 = self.grid_crop(img2, self.patch_size)
+
+            min_img, max_img = get_contrast(img2)
+
+            img2 = (img2 - min_img) / (max_img - min_img + 1e-5)
+            img1 = ((img1 - min_img) / (max_img - min_img + 1e-5)).clamp(0, 1)
 
             return img1, img2
 
