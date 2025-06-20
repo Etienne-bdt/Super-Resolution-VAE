@@ -86,8 +86,17 @@ class Cond_SRVAE(BaseVAE):
             nn.Sigmoid(),  # Ensure output is in [0, 1]
         )
 
+        self.pre_enc_x = down_block(in_channels=4, out_channels=4)
+
         self.encoder_x = nn.Sequential(
-            down_block(in_channels=4, out_channels=16),
+            nn.Conv2d(
+                in_channels=8, out_channels=8, kernel_size=3, stride=1, padding=1
+            ),
+            nn.LeakyReLU(0.2),
+            nn.Conv2d(
+                in_channels=8, out_channels=16, kernel_size=3, stride=1, padding=1
+            ),
+            nn.LeakyReLU(0.2),
             down_block(in_channels=16, out_channels=64),
             down_block(
                 in_channels=64,
@@ -118,27 +127,27 @@ class Cond_SRVAE(BaseVAE):
 
         self.z_carac = nn.Sequential(
             down_block(
-                in_channels=self.latent_size * 3 // 64,
-                out_channels=self.latent_size * 3 // 32,
+                in_channels=self.latent_size * 2 // 64,
+                out_channels=self.latent_size * 2 // 32,
             ),
             nn.Conv2d(
-                in_channels=self.latent_size * 3 // 32,
-                out_channels=self.latent_size * 3 // 32,
+                in_channels=self.latent_size * 2 // 32,
+                out_channels=self.latent_size * 2 // 32,
                 kernel_size=3,
                 stride=1,
                 padding=1,
             ),
             nn.LeakyReLU(0.2),
             nn.Conv2d(
-                in_channels=self.latent_size * 3 // 32,
-                out_channels=self.latent_size * 3 // 16,
+                in_channels=self.latent_size * 2 // 32,
+                out_channels=self.latent_size * 2 // 16,
                 kernel_size=3,
                 stride=1,
                 padding=1,
             ),
             nn.LeakyReLU(0.2),
             nn.Conv2d(
-                in_channels=self.latent_size * 3 // 16,
+                in_channels=self.latent_size * 2 // 16,
                 out_channels=self.latent_size * 2 // 16,
                 kernel_size=3,
                 stride=1,
@@ -266,6 +275,44 @@ class Cond_SRVAE(BaseVAE):
             ),
         )
 
+        self.u_to_xz = nn.Sequential(
+            nn.Unflatten(
+                1,
+                (
+                    self.latent_size_y // 64,
+                    self.patch_size // 2**3,
+                    self.patch_size // 2**3,
+                ),
+            ),
+            nn.Conv2d(
+                self.latent_size_y // 64,
+                self.latent_size_y // 64,
+                kernel_size=3,
+                padding=1,
+            ),
+            nn.LeakyReLU(0.2),
+            nn.Conv2d(
+                self.latent_size_y // 64,
+                self.latent_size_y // 32,
+                kernel_size=3,
+                padding=1,
+            ),
+            nn.LeakyReLU(0.2),
+            nn.Conv2d(
+                self.latent_size_y // 32,
+                self.latent_size_y // 32,
+                kernel_size=3,
+                padding=1,
+            ),
+            nn.LeakyReLU(0.2),
+            nn.Conv2d(
+                self.latent_size_y // 32,
+                self.latent_size_y // 16,
+                kernel_size=3,
+                padding=1,
+            ),
+        )
+
         self.uy_z = nn.Sequential(
             nn.Unflatten(
                 1,
@@ -313,9 +360,11 @@ class Cond_SRVAE(BaseVAE):
         y = self.encoder_y(y)
         return torch.chunk(y, 2, dim=1)
 
-    def encode_x(self, x):
+    def encode_x(self, x, y):
         # Define the encoder part of the VAE
-        return self.encoder_x(x)
+        x = self.pre_enc_x(x)
+        stack = torch.cat((x, y), dim=1)
+        return self.encoder_x(stack)
 
     def reparameterize(self, mu, logvar):
         # Reparameterization trick
@@ -333,15 +382,16 @@ class Cond_SRVAE(BaseVAE):
     def forward(self, x, y):
         mu_u, logvar_u = self.encode_y(y)
         u = self.reparameterize(mu_u, logvar_u)
-        x_enc = self.encode_x(x)
+        x_enc = self.encode_x(x, y)
         y_enc = self.y_to_z(y)
-        u_enc = self.u_to_z(u)
+        u_enc = self.u_to_xz(u)
 
         mu_z, logvar_z = torch.chunk(
-            self.z_carac(torch.cat((x_enc, y_enc, u_enc), dim=1)), 2, dim=1
+            self.z_carac(torch.cat((x_enc, u_enc), dim=1)), 2, dim=1
         )
         z = self.reparameterize(mu_z, logvar_z)
 
+        u_enc = self.u_to_z(u)
         y_enc = y_enc.view(y_enc.size(0), -1)
         u_enc = u_enc.view(u_enc.size(0), -1)
         mu_z_uy, logvar_z_uy = self.z_cond(y_enc, u_enc)
