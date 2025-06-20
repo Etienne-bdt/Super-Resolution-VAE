@@ -31,17 +31,14 @@ class Cond_SRVAE(BaseVAE):
                 in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1
             ),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm2d(64),
             nn.Conv2d(
                 in_channels=64, out_channels=128, kernel_size=3, stride=1, padding=1
             ),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm2d(128),
             nn.Conv2d(
                 in_channels=128, out_channels=128, kernel_size=3, stride=1, padding=1
             ),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm2d(128),
             nn.Conv2d(
                 in_channels=128,
                 out_channels=(self.latent_size_y // 64)
@@ -75,17 +72,14 @@ class Cond_SRVAE(BaseVAE):
                 in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1
             ),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm2d(64),
             nn.Conv2d(
                 in_channels=64, out_channels=16, kernel_size=3, stride=1, padding=1
             ),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm2d(16),
             nn.Conv2d(
                 in_channels=16, out_channels=16, kernel_size=3, stride=1, padding=1
             ),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm2d(16),
             nn.Conv2d(
                 in_channels=16, out_channels=4, kernel_size=3, stride=1, padding=1
             ),
@@ -103,17 +97,14 @@ class Cond_SRVAE(BaseVAE):
                 in_channels=128, out_channels=128, kernel_size=3, stride=1, padding=1
             ),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm2d(128),
             nn.Conv2d(
                 in_channels=128, out_channels=128, kernel_size=3, stride=1, padding=1
             ),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm2d(128),
             nn.Conv2d(
                 in_channels=128, out_channels=128, kernel_size=3, stride=1, padding=1
             ),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm2d(128),
             nn.Conv2d(
                 in_channels=128,
                 out_channels=(self.latent_size // 64),
@@ -122,7 +113,6 @@ class Cond_SRVAE(BaseVAE):
                 padding=1,
             ),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm2d(self.latent_size // 64),
             # out 1024 * 4 * 4 = 16384
         )  # out 1024, 4, 4
 
@@ -139,7 +129,6 @@ class Cond_SRVAE(BaseVAE):
                 padding=1,
             ),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm2d(self.latent_size * 3 // 32),
             nn.Conv2d(
                 in_channels=self.latent_size * 3 // 32,
                 out_channels=self.latent_size * 3 // 16,
@@ -148,7 +137,6 @@ class Cond_SRVAE(BaseVAE):
                 padding=1,
             ),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm2d(self.latent_size * 3 // 16),
             nn.Conv2d(
                 in_channels=self.latent_size * 3 // 16,
                 out_channels=self.latent_size * 2 // 16,
@@ -157,7 +145,6 @@ class Cond_SRVAE(BaseVAE):
                 padding=1,
             ),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm2d(self.latent_size * 2 // 16),
             nn.Conv2d(
                 in_channels=self.latent_size * 2 // 16,
                 out_channels=self.latent_size * 2 // 16,
@@ -193,17 +180,14 @@ class Cond_SRVAE(BaseVAE):
                 in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1
             ),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm2d(64),
             nn.Conv2d(
                 in_channels=64, out_channels=16, kernel_size=3, stride=1, padding=1
             ),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm2d(16),
             nn.Conv2d(
                 in_channels=16, out_channels=16, kernel_size=3, stride=1, padding=1
             ),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm2d(16),
             nn.Conv2d(
                 in_channels=16, out_channels=4, kernel_size=3, stride=1, padding=1
             ),
@@ -217,17 +201,14 @@ class Cond_SRVAE(BaseVAE):
                 in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1
             ),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm2d(64),
             nn.Conv2d(
                 in_channels=64, out_channels=128, kernel_size=3, stride=1, padding=1
             ),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm2d(128),
             nn.Conv2d(
                 in_channels=128, out_channels=128, kernel_size=3, stride=1, padding=1
             ),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm2d(128),
             nn.Conv2d(
                 in_channels=128,
                 out_channels=self.latent_size // 64,
@@ -255,7 +236,6 @@ class Cond_SRVAE(BaseVAE):
                 padding=1,
             ),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm2d(self.latent_size_y // 64),
             nn.Conv2d(
                 self.latent_size_y // 64,
                 self.latent_size_y // 32,
@@ -263,7 +243,6 @@ class Cond_SRVAE(BaseVAE):
                 padding=1,
             ),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm2d(self.latent_size_y // 32),
             nn.Conv2d(
                 self.latent_size_y // 32,
                 self.latent_size_y // 32,
@@ -271,7 +250,6 @@ class Cond_SRVAE(BaseVAE):
                 padding=1,
             ),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm2d(self.latent_size_y // 32),
             nn.Conv2d(
                 self.latent_size_y // 32,
                 self.latent_size_y // 16,
@@ -296,12 +274,10 @@ class Cond_SRVAE(BaseVAE):
                 padding=1,
             ),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm2d(self.latent_size // 16),
             nn.Conv2d(
                 self.latent_size // 16, self.latent_size // 16, kernel_size=3, padding=1
             ),
             nn.LeakyReLU(0.2),
-            nn.BatchNorm2d(self.latent_size // 16),
             nn.Conv2d(
                 self.latent_size // 16,
                 self.latent_size * 2 // 16,
