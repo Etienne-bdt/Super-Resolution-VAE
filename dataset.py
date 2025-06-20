@@ -186,8 +186,8 @@ class Sen2VenDataset(Dataset):
 
             min_img, max_img = get_contrast(img2)
 
-            img2 = (img2 - min_img) / (max_img - min_img + 1e-5)
-            img1 = ((img1 - min_img) / (max_img - min_img + 1e-5)).clamp(0, 1)
+            img2 = (img2 - min_img) / (max_img - min_img)
+            img1 = ((img1 - min_img) / (max_img - min_img)).clamp(0, 1)
 
             return img1, img2
 

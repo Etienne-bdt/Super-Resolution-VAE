@@ -235,7 +235,7 @@ class down_block(nn.Module):
             in_channels, out_channels, kernel_size=4, stride=2, padding=1
         )
         self.bn = nn.BatchNorm2d(out_channels)
-        self.relu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
+        self.relu = nn.ReLU()
 
     def forward(self, x):
         """
@@ -276,7 +276,7 @@ class up_block(nn.Module):
             in_channels, out_channels, kernel_size=4, stride=2, padding=1
         )
         self.bn = nn.BatchNorm2d(out_channels)
-        self.relu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
+        self.relu = nn.ReLU()
 
     def forward(self, x):
         """
