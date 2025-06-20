@@ -173,40 +173,32 @@ class Cond_SRVAE(BaseVAE):
                     self.patch_size // 2**3,
                 ),
             ),
-            nn.Conv2d(
+            up_block(
                 in_channels=self.latent_size * 3 // 64,
-                out_channels=self.latent_size * 3 // 64,
-                kernel_size=3,
-                stride=1,
-                padding=1,
-            ),
-            nn.LeakyReLU(0.2),
-            nn.Conv2d(
-                in_channels=self.latent_size * 3 // 64,
-                out_channels=512,
-                kernel_size=3,
-                stride=1,
-                padding=1,
-            ),
-            nn.LeakyReLU(0.2),
-            nn.Conv2d(
-                in_channels=512, out_channels=512, kernel_size=3, stride=1, padding=1
-            ),
-            nn.LeakyReLU(0.2),
-            nn.Conv2d(
-                in_channels=512, out_channels=256, kernel_size=3, stride=1, padding=1
+                out_channels=256,
             ),
             up_block(
                 in_channels=256,
+                out_channels=128,
+            ),
+            up_block(
+                in_channels=128,
                 out_channels=64,
             ),
-            up_block(
-                in_channels=64,
-                out_channels=16,
+            nn.Conv2d(
+                in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1
             ),
-            up_block(
-                in_channels=16,
-                out_channels=4,
+            nn.LeakyReLU(0.2),
+            nn.Conv2d(
+                in_channels=64, out_channels=16, kernel_size=3, stride=1, padding=1
+            ),
+            nn.LeakyReLU(0.2),
+            nn.Conv2d(
+                in_channels=16, out_channels=16, kernel_size=3, stride=1, padding=1
+            ),
+            nn.LeakyReLU(0.2),
+            nn.Conv2d(
+                in_channels=16, out_channels=4, kernel_size=3, stride=1, padding=1
             ),
             nn.Sigmoid(),  # Ensure output is in [0, 1]
         )
