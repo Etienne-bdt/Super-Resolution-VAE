@@ -330,7 +330,7 @@ class Cond_SRVAE(BaseVAE):
         u_enc = self.u_to_z(u)
 
         mu_z, logvar_z = torch.chunk(
-            self.z_carac(torch.cat((x_enc, u_enc), dim=1)), 2, dim=1
+            self.z_carac(torch.cat((x_enc, y_enc, u_enc), dim=1)), 2, dim=1
         )
         z = self.reparameterize(mu_z, logvar_z)
 
