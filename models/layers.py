@@ -346,7 +346,7 @@ class conv_block(nn.Module):
         super(conv_block, self).__init__()
         self.conv1 = nn.Conv2d(
             in_channels,
-            out_channels,
+            in_channels,
             kernel_size=kernel_size,
             stride=stride,
             padding=padding,
