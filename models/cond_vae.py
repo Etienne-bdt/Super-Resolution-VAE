@@ -9,7 +9,7 @@ from tqdm import tqdm
 from loss import cond_loss
 
 from .base import BaseVAE
-from .layers import down_block, up_block
+from .layers import conv_block, down_block, up_block
 
 
 class Cond_SRVAE(BaseVAE):
@@ -27,26 +27,8 @@ class Cond_SRVAE(BaseVAE):
         self.encoder_y = nn.Sequential(
             down_block(in_channels=4, out_channels=16),  # out 16 , 16 , 16
             down_block(in_channels=16, out_channels=64),  # out 64, 8, 8
-            nn.Conv2d(
-                in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1
-            ),
-            nn.LeakyReLU(),
-            nn.Conv2d(
-                in_channels=64, out_channels=128, kernel_size=3, stride=1, padding=1
-            ),
-            nn.LeakyReLU(),
-            nn.Conv2d(
-                in_channels=128, out_channels=128, kernel_size=3, stride=1, padding=1
-            ),
-            nn.LeakyReLU(),
-            nn.Conv2d(
-                in_channels=128,
-                out_channels=(self.latent_size_y // 64)
-                * 2,  # Output channels for mu and logvar
-                kernel_size=3,
-                stride=1,
-                padding=1,
-            ),
+            conv_block(64, 128, 3, 1, 1),
+            conv_block(128, self.latent_size_y // 64, 3, 1, 1, final_relu=False),
             nn.Flatten(start_dim=1),  # Flatten to (batch_size, latent_size // 8)
             # out 512 * 2 * 2 = 2048
         )
@@ -68,21 +50,9 @@ class Cond_SRVAE(BaseVAE):
                 in_channels=128,
                 out_channels=64,
             ),
-            nn.Conv2d(
-                in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1
-            ),
-            nn.LeakyReLU(),
-            nn.Conv2d(
-                in_channels=64, out_channels=16, kernel_size=3, stride=1, padding=1
-            ),
-            nn.LeakyReLU(),
-            nn.Conv2d(
-                in_channels=16, out_channels=16, kernel_size=3, stride=1, padding=1
-            ),
-            nn.LeakyReLU(),
-            nn.Conv2d(
-                in_channels=16, out_channels=4, kernel_size=3, stride=1, padding=1
-            ),
+            conv_block(64, 64, 3, 1, 1),
+            conv_block(64, 16, 3, 1, 1),
+            conv_block(16, 4, 3, 1, 1, final_relu=False),
             nn.Sigmoid(),  # Ensure output is in [0, 1]
         )
 
@@ -93,64 +63,38 @@ class Cond_SRVAE(BaseVAE):
                 in_channels=64,
                 out_channels=128,
             ),
-            nn.Conv2d(
-                in_channels=128, out_channels=128, kernel_size=3, stride=1, padding=1
-            ),
-            nn.LeakyReLU(),
-            nn.Conv2d(
-                in_channels=128, out_channels=128, kernel_size=3, stride=1, padding=1
-            ),
-            nn.LeakyReLU(),
-            nn.Conv2d(
-                in_channels=128, out_channels=128, kernel_size=3, stride=1, padding=1
-            ),
-            nn.LeakyReLU(),
-            nn.Conv2d(
-                in_channels=128,
-                out_channels=(self.latent_size // 64),
-                kernel_size=3,
-                stride=1,
-                padding=1,
-            ),
-            nn.LeakyReLU(),
+            conv_block(128, 128, 3, 1, 1),
+            conv_block(128, 128, 3, 1, 1),
+            conv_block(128, self.latent_size // 64, 3, 1),
             # out 1024 * 4 * 4 = 16384
         )  # out 1024, 4, 4
 
         self.z_carac = nn.Sequential(
             down_block(
                 in_channels=self.latent_size * 3 // 64,
-                out_channels=self.latent_size * 3 // 32,
+                out_channels=self.latent_size // 32,
             ),
-            nn.Conv2d(
-                in_channels=self.latent_size * 3 // 32,
-                out_channels=self.latent_size * 3 // 32,
+            conv_block(
+                in_channels=self.latent_size // 32,
+                out_channels=self.latent_size // 16,
                 kernel_size=3,
                 stride=1,
                 padding=1,
             ),
-            nn.LeakyReLU(),
-            nn.Conv2d(
-                in_channels=self.latent_size * 3 // 32,
-                out_channels=self.latent_size * 3 // 16,
+            conv_block(
+                in_channels=self.latent_size // 16,
+                out_channels=self.latent_size // 16,
                 kernel_size=3,
                 stride=1,
                 padding=1,
             ),
-            nn.LeakyReLU(),
-            nn.Conv2d(
-                in_channels=self.latent_size * 3 // 16,
+            conv_block(
+                in_channels=self.latent_size // 16,
                 out_channels=self.latent_size * 2 // 16,
                 kernel_size=3,
                 stride=1,
                 padding=1,
-            ),
-            nn.LeakyReLU(),
-            nn.Conv2d(
-                in_channels=self.latent_size * 2 // 16,
-                out_channels=self.latent_size * 2 // 16,
-                kernel_size=3,
-                stride=1,
-                padding=1,
+                final_relu=False,
             ),
             nn.Flatten(1),
         )
@@ -176,20 +120,15 @@ class Cond_SRVAE(BaseVAE):
                 in_channels=128,
                 out_channels=64,
             ),
-            nn.Conv2d(
-                in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1
-            ),
-            nn.LeakyReLU(),
-            nn.Conv2d(
-                in_channels=64, out_channels=16, kernel_size=3, stride=1, padding=1
-            ),
-            nn.LeakyReLU(),
-            nn.Conv2d(
-                in_channels=16, out_channels=16, kernel_size=3, stride=1, padding=1
-            ),
-            nn.LeakyReLU(),
-            nn.Conv2d(
-                in_channels=16, out_channels=4, kernel_size=3, stride=1, padding=1
+            conv_block(64, 64, 3, 1, 1),
+            conv_block(64, 16, 3, 1, 1),
+            conv_block(
+                in_channels=16,
+                out_channels=4,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                final_relu=False,
             ),
             nn.Sigmoid(),  # Ensure output is in [0, 1]
         )
@@ -197,25 +136,8 @@ class Cond_SRVAE(BaseVAE):
         self.y_to_z = nn.Sequential(
             down_block(in_channels=4, out_channels=16),
             down_block(in_channels=16, out_channels=64),
-            nn.Conv2d(
-                in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1
-            ),
-            nn.LeakyReLU(),
-            nn.Conv2d(
-                in_channels=64, out_channels=128, kernel_size=3, stride=1, padding=1
-            ),
-            nn.LeakyReLU(),
-            nn.Conv2d(
-                in_channels=128, out_channels=128, kernel_size=3, stride=1, padding=1
-            ),
-            nn.LeakyReLU(),
-            nn.Conv2d(
-                in_channels=128,
-                out_channels=self.latent_size // 64,
-                kernel_size=3,
-                stride=1,
-                padding=1,
-            ),
+            conv_block(64, 128, 3, 1, 1),
+            conv_block(128, self.latent_size // 64, 3, 1, 1),
             # Flatten to (batch_size, latent_size // 3)
             # out 8192
         )
@@ -229,31 +151,18 @@ class Cond_SRVAE(BaseVAE):
                     self.patch_size // 2**3,
                 ),
             ),
-            nn.Conv2d(
-                self.latent_size_y // 64,
-                self.latent_size_y // 64,
+            conv_block(
+                in_channels=self.latent_size_y // 64,
+                out_channels=self.latent_size_y // 32,
                 kernel_size=3,
+                stride=1,
                 padding=1,
             ),
-            nn.LeakyReLU(),
-            nn.Conv2d(
-                self.latent_size_y // 64,
-                self.latent_size_y // 32,
+            conv_block(
+                in_channels=self.latent_size_y // 32,
+                out_channels=self.latent_size_y // 16,
                 kernel_size=3,
-                padding=1,
-            ),
-            nn.LeakyReLU(),
-            nn.Conv2d(
-                self.latent_size_y // 32,
-                self.latent_size_y // 32,
-                kernel_size=3,
-                padding=1,
-            ),
-            nn.LeakyReLU(),
-            nn.Conv2d(
-                self.latent_size_y // 32,
-                self.latent_size_y // 16,
-                kernel_size=3,
+                stride=1,
                 padding=1,
             ),
         )
@@ -262,27 +171,25 @@ class Cond_SRVAE(BaseVAE):
             nn.Unflatten(
                 1,
                 (
-                    self.latent_size * 2 // 16,
-                    self.patch_size // 2**4,
-                    self.patch_size // 2**4,
+                    self.latent_size * 2 // 64,
+                    self.patch_size // 2**3,
+                    self.patch_size // 2**3,
                 ),
             ),
-            nn.Conv2d(
-                self.latent_size * 2 // 16,
-                self.latent_size // 16,
+            conv_block(
+                in_channels=self.latent_size * 2 // 64,
+                out_channels=self.latent_size // 64,
                 kernel_size=3,
+                stride=1,
                 padding=1,
             ),
-            nn.LeakyReLU(),
-            nn.Conv2d(
-                self.latent_size // 16, self.latent_size // 16, kernel_size=3, padding=1
-            ),
-            nn.LeakyReLU(),
-            nn.Conv2d(
-                self.latent_size // 16,
-                self.latent_size * 2 // 16,
+            conv_block(
+                in_channels=self.latent_size // 64,
+                out_channels=self.latent_size * 2 // 64,
                 kernel_size=3,
+                stride=1,
                 padding=1,
+                final_relu=False,
             ),
             nn.Flatten(1),
         )

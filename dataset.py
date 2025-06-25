@@ -21,15 +21,17 @@ def init_dataloader(dataset: str, batch_size: int = 16, patch_size: int = 256):
         val_loader (DataLoader): The dataloader for the validation set.
     """
     if dataset == "Sen2Venus" or dataset == "sen2venus" or dataset == "s2v":
-        ds = Sen2VenDataset(patch_size)
+        t_ds = Sen2VenDataset(patch_size)
+        v_ds = Sen2VenDataset(patch_size=patch_size, crop="center")
 
     elif dataset == "Floods" or dataset == "floods":
-        ds = FloodDataset(patch_size=256)
+        t_ds = FloodDataset(patch_size=256)
+        v_ds = FloodDataset(patch_size=256)
     else:
         raise ValueError(f"Unknown dataset: {dataset}")
-    train_size = int(0.8 * len(ds))
-    train_ds = torch.utils.data.Subset(ds, range(train_size))
-    val_ds = torch.utils.data.Subset(ds, range(train_size, len(ds)))
+    train_size = int(0.8 * len(t_ds))
+    train_ds = torch.utils.data.Subset(t_ds, range(train_size))
+    val_ds = torch.utils.data.Subset(v_ds, range(train_size, len(v_ds)))
     train_loader = torch.utils.data.DataLoader(
         train_ds,
         batch_size,
@@ -108,7 +110,7 @@ class Sen2VenDataset(Dataset):
         self.df = pl.read_csv(csv_path, has_header=True, separator="	")
         self.patch_size = patch_size
         self.crop = crop
-        if crop not in ["grid", "random"]:
+        if crop not in ["grid", "random", "center"]:
             raise ValueError("Crop must be 'grid' or 'random'")
         if bands == "visu":
             self.df = self.df.select(["b2b3b4b8_10m", "b2b3b4b8_05m"])
@@ -184,11 +186,28 @@ class Sen2VenDataset(Dataset):
             if self.transform:
                 if self.crop == "random":
                     img1, img2 = self.sr_randomcrop(img1, img2)
+                elif self.crop == "center":
+                    img1 = self.center_crop(img1, self.patch_size // 2)
+                    img2 = self.center_crop(img2, self.patch_size)
                 elif self.crop == "grid":
                     img1 = self.grid_crop(img1, self.patch_size // 2)
                     img2 = self.grid_crop(img2, self.patch_size)
 
             return img1, img2
+
+    def center_crop(self, img, patch_size):
+        """
+        Center crop the image to the specified patch size.
+        Args:
+            img (torch.Tensor): The image tensor to crop.
+            patch_size (int): The size of the patch to crop.
+        Returns:
+            torch.Tensor: The cropped image tensor.
+        """
+        _, h, w = img.shape
+        top = (h - patch_size) // 2
+        left = (w - patch_size) // 2
+        return img[:, top : top + patch_size, left : left + patch_size]
 
     def sr_randomcrop(self, img1, img2):
         """

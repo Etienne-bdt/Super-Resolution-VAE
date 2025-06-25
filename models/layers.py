@@ -231,12 +231,15 @@ class down_block(nn.Module):
         self.conv = nn.Conv2d(
             in_channels, in_channels, kernel_size=3, stride=1, padding=1
         )
+        self.conv2 = nn.Conv2d(
+            in_channels, in_channels, kernel_size=3, stride=1, padding=1
+        )
         self.downsample = nn.Conv2d(
             in_channels, out_channels, kernel_size=4, stride=2, padding=1
         )
         self.bn_in = nn.BatchNorm2d(in_channels)
         self.bn = nn.BatchNorm2d(out_channels)
-        self.relu = nn.ReLU()
+        self.relu = nn.LeakyReLU()
 
     def forward(self, x):
         """
@@ -254,7 +257,10 @@ class down_block(nn.Module):
         #    x = self.bn_in(x)
         if self.with_relu:
             x = self.relu(x)
+        x = self.conv2(x)
         x = x + inp  # Residual connection
+        x = self.relu(x) if self.with_relu else x
+        # x = x + inp  # Residual connection
         x = self.downsample(x)
         if self.with_bn:
             x = self.bn(x)
@@ -279,12 +285,15 @@ class up_block(nn.Module):
         self.conv = nn.Conv2d(
             in_channels, in_channels, kernel_size=3, stride=1, padding=1
         )
+        self.conv2 = nn.Conv2d(
+            in_channels, in_channels, kernel_size=3, stride=1, padding=1
+        )
         self.upsample = nn.ConvTranspose2d(
             in_channels, out_channels, kernel_size=4, stride=2, padding=1
         )
         self.bn_in = nn.BatchNorm2d(in_channels)
         self.bn = nn.BatchNorm2d(out_channels)
-        self.relu = nn.ReLU()
+        self.relu = nn.LeakyReLU()
 
     def forward(self, x):
         """
@@ -302,13 +311,72 @@ class up_block(nn.Module):
         #    x = self.bn_in(x)
         if self.with_relu:
             x = self.relu(x)
+        x = self.conv2(x)
         x = x + inp  # Residual connection
+        x = self.relu(x) if self.with_relu else x
         x = self.upsample(x)
         if self.with_bn:
             x = self.bn(x)
         if self.with_relu:
             x = self.relu(x)
         return x
+
+
+class conv_block(nn.Module):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size=3,
+        stride=1,
+        padding=1,
+        final_relu=True,
+    ):
+        """
+        Convolutional block with convolution, batch normalization, and ReLU activation.
+
+        Args:
+            in_channels (int): Number of input channels.
+            out_channels (int): Number of output channels.
+            kernel_size (int): Size of the convolution kernel (default: 3).
+            stride (int): Stride for the convolution (default: 1).
+            padding (int): Padding for the convolution (default: 1).
+
+        """
+        super(conv_block, self).__init__()
+        self.conv1 = nn.Conv2d(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+        )
+        self.conv2 = nn.Conv2d(
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+        )
+        self.relu = nn.LeakyReLU()
+        self.final_relu = final_relu
+
+    def forward(self, x):
+        """
+        Forward pass through the convolutional block.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, in_channels, height, width).
+
+        Returns:
+            torch.Tensor: Output tensor of shape (batch_size, out_channels, new_height, new_width).
+        """
+        inp = x
+        x = self.conv1(x)
+        x = self.relu(x)
+        x = self.conv2(x)
+        x = x + inp
+        return self.relu(x) if self.final_relu else x
 
 
 class self_attention(nn.Module):
