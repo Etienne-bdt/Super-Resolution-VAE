@@ -353,11 +353,19 @@ class conv_block(nn.Module):
         )
         self.conv2 = nn.Conv2d(
             in_channels,
+            in_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+        )
+        self.conv3 = nn.Conv2d(
+            in_channels,
             out_channels,
             kernel_size=kernel_size,
             stride=stride,
             padding=padding,
         )
+
         self.relu = nn.LeakyReLU()
         self.final_relu = final_relu
 
@@ -376,6 +384,7 @@ class conv_block(nn.Module):
         x = self.relu(x)
         x = self.conv2(x)
         x = x + inp
+        x = self.conv3(x)
         return self.relu(x) if self.final_relu else x
 
 

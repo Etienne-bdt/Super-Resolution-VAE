@@ -28,7 +28,7 @@ class Cond_SRVAE(BaseVAE):
             down_block(in_channels=4, out_channels=16),  # out 16 , 16 , 16
             down_block(in_channels=16, out_channels=64),  # out 64, 8, 8
             conv_block(64, 128, 3, 1, 1),
-            conv_block(128, self.latent_size_y // 64, 3, 1, 1, final_relu=False),
+            conv_block(128, self.latent_size_y // 32, 3, 1, 1, final_relu=False),
             nn.Flatten(start_dim=1),  # Flatten to (batch_size, latent_size // 8)
             # out 512 * 2 * 2 = 2048
         )
