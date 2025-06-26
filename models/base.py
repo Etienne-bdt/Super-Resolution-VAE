@@ -117,9 +117,9 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
 
             # Average the loss terms
             for key in terms_dict:
-                terms_dict[key] /= len(train_loader)
+                terms_dict[key] /= len(train_loader) * b
             self.terms_dict = terms_dict
-            train_loss /= len(train_loader)
+            train_loss /= len(train_loader) * b
             self.log(self.wandb_run, terms_dict, step=epoch)
 
             if isnan(train_loss):
@@ -158,9 +158,9 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
 
             # Average the validation loss terms
             for key in val_terms_dict:
-                val_terms_dict[key] /= len(val_loader)
+                val_terms_dict[key] /= len(val_loader) * b
 
-            val_loss /= len(val_loader)
+            val_loss /= len(val_loader) * b
             if self.scheduler:
                 self.scheduler.step(val_loss)
             self.log(self.wandb_run, val_terms_dict, step=epoch)
