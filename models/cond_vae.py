@@ -579,8 +579,8 @@ class Cond_SRVAE(BaseVAE):
             y.to(next(self.parameters()).device),
             x.to(next(self.parameters()).device),
         )
-        return y[7:8, :, :, :], x[
-            7:8, :, :, :
+        return y[2:3, :, :, :], x[
+            2:3, :, :, :
         ]  # Return a single sample for task evaluation
 
 
