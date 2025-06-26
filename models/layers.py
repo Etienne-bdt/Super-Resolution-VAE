@@ -260,7 +260,6 @@ class down_block(nn.Module):
         x = self.conv2(x)
         x = x + inp  # Residual connection
         x = self.relu(x) if self.with_relu else x
-        # x = x + inp  # Residual connection
         x = self.downsample(x)
         if self.with_bn:
             x = self.bn(x)
