@@ -1,3 +1,4 @@
+import math
 import os
 
 import torch
@@ -239,12 +240,12 @@ class Cond_SRVAE(BaseVAE):
         mu_z, logvar_z = torch.chunk(
             self.z_carac(torch.cat((x_enc, y_enc, u_enc), dim=1)), 2, dim=1
         )
-        z = self.reparameterize(mu_z, logvar_z)
 
         y_enc = y_enc.view(y_enc.size(0), -1)
         u_enc = u_enc.view(u_enc.size(0), -1)
         mu_z_uy, logvar_z_uy = self.z_cond(y_enc, u_enc)
 
+        z = self.reparameterize(mu_z_uy, logvar_z_uy)
         x_hat = self.decode_x(z, y_enc, u_enc)
         y_hat = self.decode_y(u)
 
@@ -264,13 +265,14 @@ class Cond_SRVAE(BaseVAE):
         x_hat = self.decode_x(z, y, u)
         return x_hat
 
-    def sample(self, y, samples=1000) -> torch.Tensor:
+    def sample(self, y, samples=100) -> torch.Tensor:
         # Generate samples from the model
+        samples_u = samples_z = int(math.sqrt(samples))
         mu_u, logvar_u = self.encode_y(y)
 
         std_u = torch.exp(0.5 * logvar_u)
         latent_u = std_u.size(1)
-        eps_u = torch.randn((samples, latent_u)).to(y.device)
+        eps_u = torch.randn((samples_u, latent_u)).to(y.device)
 
         u = mu_u + eps_u * std_u
 
@@ -285,17 +287,28 @@ class Cond_SRVAE(BaseVAE):
 
         mu_z_uy, logvar_z_uy = self.z_cond(y, u)
 
-        mu_z_uy, logvar_z_uy = (
-            mu_z_uy.mean(dim=0).unsqueeze(0),
-            logvar_z_uy.mean(dim=0).unsqueeze(0),
-        )
+        # Generate samples_z samples for each u sample (vectorized)
+        std_z = torch.exp(0.5 * logvar_z_uy)  # Shape: (samples_u, latent_dim)
+        latent_z = std_z.size(1)
 
-        std = torch.exp(0.5 * logvar_z_uy)
-        latent = std.size(1)
-        eps = torch.randn((samples, latent)).to(y.device)
+        # Generate all random samples at once
+        eps_z = torch.randn((samples_u, samples_z, latent_z)).to(y.device)
 
-        z = mu_z_uy + eps * std
+        # Expand mu and std for broadcasting
+        mu_z_expanded = mu_z_uy.unsqueeze(1).expand(
+            -1, samples_z, -1
+        )  # Shape: (samples_u, 1, latent_dim)
+        std_z_expanded = std_z.unsqueeze(1).expand(
+            -1, samples_z, -1
+        )  # Shape: (samples_u, 1, latent_dim)
 
+        # Sample z for all u samples at once
+        z = (
+            mu_z_expanded + eps_z * std_z_expanded
+        )  # Shape: (samples_u, samples_z, latent_dim)
+        z = z.view(-1, latent_z)  # Reshape to (samples_u * samples_z, latent_dim)
+
+        y, u = y.expand(samples, -1), u.expand(samples, -1)
         return self.decode_x(z, y, u)
 
     def generation(self):
