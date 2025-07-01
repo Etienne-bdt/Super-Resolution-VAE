@@ -14,7 +14,7 @@ from .layers import conv_block, down_block, up_block
 
 
 class Cond_SRVAE(BaseVAE):
-    def __init__(self, cr, patch_size=64, callbacks=None, slurm_job_id="local"):
+    def __init__(self, cr, patch_size=64, callbacks=None, slurm_job_id="local", L=100):
         if callbacks is None:
             callbacks = []
         super(Cond_SRVAE, self).__init__(patch_size, callbacks, slurm_job_id)
@@ -22,7 +22,7 @@ class Cond_SRVAE(BaseVAE):
         self.latent_size = int((patch_size * patch_size * 4 / self.cr) // 256) * 256
         self.latent_size_y = self.latent_size // 4
         self.patch_size = patch_size
-        self.L = 10
+        self.L = L
         self.gammax = torch.tensor(1.0, requires_grad=True)
         self.gammay = torch.tensor(1.0, requires_grad=True)
 
@@ -252,7 +252,7 @@ class Cond_SRVAE(BaseVAE):
         u_enc = u_enc.view(u_enc.size(0), -1)
         mu_z_uy, logvar_z_uy = self.z_cond(y_enc, u_enc)
         for _ in range(L):
-            z = self.reparameterize(mu_z, logvar_z)
+            z = self.reparameterize(mu_z_uy, logvar_z_uy)
             x_hat = self.decode_x(z, y_enc, u_enc)
             y_hat = self.decode_y(u)
             x_hat_list.append(x_hat.unsqueeze(0))

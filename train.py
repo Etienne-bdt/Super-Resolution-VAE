@@ -31,6 +31,9 @@ def main(args):
         ),
         callbacks.EarlyStopping(patience=25, delta=0.01),
     ]
+
+    L = 100
+
     if args.model_type == "VAE":
         model = models.VAE(
             cr,
@@ -40,7 +43,11 @@ def main(args):
         )
     elif args.model_type == "Cond_SRVAE":
         model = models.Cond_SRVAE(
-            cr, args.patch_size, callbacks=callbacks_list, slurm_job_id=slurm_job_id
+            cr,
+            args.patch_size,
+            callbacks=callbacks_list,
+            slurm_job_id=slurm_job_id,
+            L=L,
         )
 
     else:
@@ -75,6 +82,7 @@ def main(args):
             start_epoch=start_epoch,
             val_metrics_every=args.val_metrics_every,
             slurm_job_id=slurm_job_id,
+            L=L,
         )
 
     model.task(val_loader)
