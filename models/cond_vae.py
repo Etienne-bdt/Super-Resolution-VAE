@@ -250,9 +250,9 @@ class Cond_SRVAE(BaseVAE):
         )
         y_enc = y_enc.view(y_enc.size(0), -1)
         u_enc = u_enc.view(u_enc.size(0), -1)
+        mu_z_uy, logvar_z_uy = self.z_cond(y_enc, u_enc)
         for _ in range(L):
-            mu_z_uy, logvar_z_uy = self.z_cond(y_enc, u_enc)
-            z = self.reparameterize(mu_z_uy, logvar_z_uy)
+            z = self.reparameterize(mu_z, logvar_z)
             x_hat = self.decode_x(z, y_enc, u_enc)
             y_hat = self.decode_y(u)
             x_hat_list.append(x_hat.unsqueeze(0))
