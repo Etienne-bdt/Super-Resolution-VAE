@@ -1,3 +1,4 @@
+import math
 import os
 
 import torch
@@ -239,12 +240,12 @@ class Cond_SRVAE(BaseVAE):
         mu_z, logvar_z = torch.chunk(
             self.z_carac(torch.cat((x_enc, y_enc, u_enc), dim=1)), 2, dim=1
         )
-        z = self.reparameterize(mu_z, logvar_z)
 
         y_enc = y_enc.view(y_enc.size(0), -1)
         u_enc = u_enc.view(u_enc.size(0), -1)
         mu_z_uy, logvar_z_uy = self.z_cond(y_enc, u_enc)
 
+        z = self.reparameterize(mu_z_uy, logvar_z_uy)
         x_hat = self.decode_x(z, y_enc, u_enc)
         y_hat = self.decode_y(u)
 
@@ -264,39 +265,91 @@ class Cond_SRVAE(BaseVAE):
         x_hat = self.decode_x(z, y, u)
         return x_hat
 
-    def sample(self, y, samples=1000) -> torch.Tensor:
-        # Generate samples from the model
+    def sample(self, y, samples=10000) -> torch.Tensor:
+        # Generate samples from the model with GPU memory management
+        samples_u = samples_z = int(math.sqrt(samples))
         mu_u, logvar_u = self.encode_y(y)
 
-        std_u = torch.exp(0.5 * logvar_u)
-        latent_u = std_u.size(1)
-        eps_u = torch.randn((samples, latent_u)).to(y.device)
+        # Determine batch size for GPU processing (10% of total or less)
+        max_gpu_samples = max(1, samples // 200)
+        batch_size = min(max_gpu_samples, samples_u)
+        print(f"Using batch size: {batch_size} for sampling.")
+        device = y.device
+        use_cpu_offload = samples > 5000
+        cpu_device = torch.device("cpu") if use_cpu_offload else device
 
-        u = mu_u + eps_u * std_u
+        # Store results on CPU to save GPU memory only if samples > 5000
+        all_outputs = []
 
-        if y.ndim == 3:
-            y = y.unsqueeze(0)
-            # Using expand to not reallocate for the same tensor
-            y = y.expand(u.size(0) - 1, -1, -1)
-        elif y.ndim == 4 and y.size(0) == 1:
-            y = y.expand(u.size(0), -1, -1, -1)
-        y = self.y_to_z(y).view(y.size(0), -1)
-        u = self.u_to_z(u).view(u.size(0), -1)
+        # Process in batches
+        for batch_start in range(0, samples_u, batch_size):
+            batch_end = min(batch_start + batch_size, samples_u)
+            current_batch_size = batch_end - batch_start
 
-        mu_z_uy, logvar_z_uy = self.z_cond(y, u)
+            # Move current batch to GPU
+            std_u = torch.exp(0.5 * logvar_u)
+            latent_u = std_u.size(1)
+            eps_u = torch.randn((current_batch_size, latent_u)).to(device)
 
-        mu_z_uy, logvar_z_uy = (
-            mu_z_uy.mean(dim=0).unsqueeze(0),
-            logvar_z_uy.mean(dim=0).unsqueeze(0),
-        )
+            u = mu_u + eps_u * std_u
 
-        std = torch.exp(0.5 * logvar_z_uy)
-        latent = std.size(1)
-        eps = torch.randn((samples, latent)).to(y.device)
+            if y.ndim == 3:
+                y_batch = y.unsqueeze(0)
+                y_batch = y_batch.expand(current_batch_size, -1, -1, -1)
+            elif y.ndim == 4 and y.size(0) == 1:
+                y_batch = y.expand(current_batch_size, -1, -1, -1)
+            else:
+                y_batch = y
 
-        z = mu_z_uy + eps * std
+            y_enc = self.y_to_z(y_batch).view(y_batch.size(0), -1)
+            u_enc = self.u_to_z(u).view(u.size(0), -1)
 
-        return self.decode_x(z, y, u)
+            mu_z_uy, logvar_z_uy = self.z_cond(y_enc, u_enc)
+
+            # Generate samples_z samples for each u sample (vectorized)
+            std_z = torch.exp(0.5 * logvar_z_uy)
+            latent_z = std_z.size(1)
+
+            # Generate all random samples at once for current batch
+            eps_z = torch.randn((current_batch_size, samples_z, latent_z)).to(device)
+
+            # Expand mu and std for broadcasting
+            mu_z_expanded = mu_z_uy.unsqueeze(1).expand(-1, samples_z, -1)
+            std_z_expanded = std_z.unsqueeze(1).expand(-1, samples_z, -1)
+
+            # Sample z for all u samples at once
+            z = mu_z_expanded + eps_z * std_z_expanded
+            z = z.view(-1, latent_z)
+
+            y_expanded = y_enc.unsqueeze(1).expand(-1, samples_z, -1)
+            u_expanded = u_enc.unsqueeze(1).expand(-1, samples_z, -1)
+            y_flat = y_expanded.reshape(current_batch_size * samples_z, -1)
+            u_flat = u_expanded.reshape(current_batch_size * samples_z, -1)
+
+            # Decode on GPU
+            batch_output = self.decode_x(z, y_flat, u_flat)
+
+            # Move to CPU only if samples > 5000
+            all_outputs.append(batch_output.to(cpu_device))
+
+            # Clear GPU cache only if using CPU offload
+            if use_cpu_offload:
+                del u, y_batch, y_enc, u_enc, mu_z_uy, logvar_z_uy, std_z, eps_z
+                del (
+                    mu_z_expanded,
+                    std_z_expanded,
+                    z,
+                    y_expanded,
+                    u_expanded,
+                    y_flat,
+                    u_flat,
+                    batch_output,
+                )
+                torch.cuda.empty_cache()
+
+        # Concatenate all results and move back to original device
+        final_output = torch.cat(all_outputs, dim=0).to(device)
+        return final_output
 
     def generation(self):
         u = torch.randn(1, self.latent_size_y).to("cuda")

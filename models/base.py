@@ -302,7 +302,7 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
 
         pred, target = self.get_task_data(val_loader)
         with torch.no_grad():
-            samples = self.sample(pred, samples=1000)
+            samples = self.sample(pred)
 
         # Compute error map of samples and GT x
         diff = samples - target
