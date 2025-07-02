@@ -32,7 +32,7 @@ def main(args):
         callbacks.EarlyStopping(patience=25, delta=0.01),
     ]
 
-    L = 100
+    L = 10
 
     if args.model_type == "VAE":
         model = models.VAE(
@@ -68,9 +68,9 @@ def main(args):
         # optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
         # optimizer.load_state_dict(save_dict["optimizer_state_dict"])
         # print("Optimizer state loaded successfully.")
-    else:
-        optimizer = torch.optim.Adam(model.parameters(), lr=5e-5)
-        start_epoch = 1
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=5e-5)
+    start_epoch = 1
 
     if not (args.test and args.model_ckpt):
         model.fit(
