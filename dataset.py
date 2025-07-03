@@ -305,6 +305,28 @@ class Sen2VenDataset(Dataset):
         for i in range(len(df)):
             self.patches.extend((df[i], j) for j in range(num_patches))
 
+    def global_norm(self):
+        max_val = float("-inf")
+        min_val = float("inf")
+        for i in range(len(self.df)):
+            item_path = self.df[i]
+            p1 = item_path[self.p0].to_numpy()[0]
+            dataset = item_path[self.p0].to_numpy()[0].split("_")[0]
+            p1 = os.path.join(dataset, p1)
+
+            img1 = tifffile.imread(p1, ioworkers=6)
+
+            img1 = torch.tensor(img1, dtype=torch.float32)
+
+            min_img = img1.min().item()
+            max_img = img1.max().item()
+
+            if min_img < min_val:
+                min_val = min_img
+            if max_img > max_val:
+                max_val = max_img
+        return min_val, max_val
+
 
 def grid_collate(batch):
     """
