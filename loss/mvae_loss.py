@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 
 
-def cond_loss(
+def multimodal_loss(
     recon_x, x, recon_y, y, mu1, logvar1, mu2, logvar2, mu3, logvar3, gammax, gammay
 ):
     """
