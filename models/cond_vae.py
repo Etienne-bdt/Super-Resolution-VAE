@@ -14,7 +14,7 @@ from .layers import conv_block, down_block, up_block
 
 
 class Cond_SRVAE(BaseVAE):
-    def __init__(self, cr, patch_size=64, callbacks=None, slurm_job_id="local"):
+    def __init__(self, cr, patch_size=64, callbacks=None, slurm_job_id="local", L=100):
         if callbacks is None:
             callbacks = []
         super(Cond_SRVAE, self).__init__(patch_size, callbacks, slurm_job_id)
@@ -22,6 +22,7 @@ class Cond_SRVAE(BaseVAE):
         self.latent_size = int((patch_size * patch_size * 4 / self.cr) // 256) * 256
         self.latent_size_y = self.latent_size // 4
         self.patch_size = patch_size
+        self.L = L
         self.gammax = torch.tensor(1.0, requires_grad=True)
         self.gammay = torch.tensor(1.0, requires_grad=True)
 
@@ -230,26 +231,41 @@ class Cond_SRVAE(BaseVAE):
         stack = torch.cat((u, y, z), dim=1)
         return self.decoder_x(stack)
 
-    def forward(self, x, y):
+    def forward(self, x, y, L=None):
+        if L is None:
+            L = self.L
         mu_u, logvar_u = self.encode_y(y)
-        u = self.reparameterize(mu_u, logvar_u)
+        x_hat_list = []
+        y_hat_list = []
+
         x_enc = self.encode_x(x)
         y_enc = self.y_to_z(y)
+        # Reparameterization trick for u
+        # This loop is added to allow multiple reparameterizations of u
+        # This is useful for sampling from the latent space
+        u = self.reparameterize(mu_u, logvar_u)
         u_enc = self.u_to_z(u)
-
         mu_z, logvar_z = torch.chunk(
             self.z_carac(torch.cat((x_enc, y_enc, u_enc), dim=1)), 2, dim=1
         )
-
         y_enc = y_enc.view(y_enc.size(0), -1)
         u_enc = u_enc.view(u_enc.size(0), -1)
         mu_z_uy, logvar_z_uy = self.z_cond(y_enc, u_enc)
+        for _ in range(L):
+            z = self.reparameterize(mu_z, logvar_z)
+            x_hat = self.decode_x(z, y_enc, u_enc)
+            y_hat = self.decode_y(u)
+            x_hat_list.append(x_hat.unsqueeze(0))
+            y_hat_list.append(y_hat.unsqueeze(0))
+        if L > 1:
+            x_hat_5d = torch.cat(x_hat_list, dim=0)
+            y_hat_5d = torch.cat(y_hat_list, dim=0)
 
-        z = self.reparameterize(mu_z_uy, logvar_z_uy)
-        x_hat = self.decode_x(z, y_enc, u_enc)
-        y_hat = self.decode_y(u)
+        else:
+            x_hat_5d = x_hat
+            y_hat_5d = y_hat
 
-        return x_hat, y_hat, mu_z, logvar_z, mu_u, logvar_u, mu_z_uy, logvar_z_uy
+        return x_hat_5d, y_hat_5d, mu_z, logvar_z, mu_u, logvar_u, mu_z_uy, logvar_z_uy
 
     def conditional_generation(self, y):
         # Generate a sample from the model
@@ -437,7 +453,7 @@ class Cond_SRVAE(BaseVAE):
             for batch in val_loader:
                 y, x = [t.to(device) for t in batch]
                 with torch.no_grad():
-                    x_hat, y_hat, *_ = self.forward(x, y)
+                    x_hat, y_hat, *_ = self.forward(x, y, L=1)
                     x_sr = self.conditional_generation(y)
 
                 b = y.size(0)
@@ -512,7 +528,7 @@ class Cond_SRVAE(BaseVAE):
             batch = next(iter(val_loader))
             y, x = [t.to(device) for t in batch]
             with torch.no_grad():
-                x_hat, y_hat, *_ = self.forward(x, y)
+                x_hat, y_hat, *_ = self.forward(x, y, L=1)
                 x_sr = self.conditional_generation(y)
 
             imgs = {

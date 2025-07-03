@@ -103,11 +103,35 @@ class FloodDataset(Dataset):
 
 
 class Sen2VenDataset(Dataset):
-    def __init__(self, patch_size=256, crop="random", dataset="ARM", bands="visu"):
+    def __init__(self, patch_size=256, crop="random", dataset=None, bands="visu"):
         super(Sen2VenDataset, self).__init__()
-        self.dataset = os.path.join(os.getcwd(), dataset)
-        csv_path = os.path.join(self.dataset, "index.csv")
-        self.df = pl.read_csv(csv_path, has_header=True, separator="	")
+        if dataset is None:
+            dataset = ["ARM", "BAMBENW2"]
+        if isinstance(dataset, str):
+            self.dataset = os.path.join(os.getcwd(), dataset)
+            csv_path = os.path.join(self.dataset, "index.csv")
+            self.df = pl.read_csv(csv_path, has_header=True, separator="	")
+        else:
+            for d in dataset:
+                if not hasattr(self, "df"):
+                    self.df = pl.read_csv(
+                        os.path.join(os.getcwd(), d, "index.csv"),
+                        has_header=True,
+                        separator="	",
+                    )
+                else:
+                    self.df = pl.concat(
+                        [
+                            self.df,
+                            pl.read_csv(
+                                os.path.join(os.getcwd(), d, "index.csv"),
+                                has_header=True,
+                                separator="	",
+                            ),
+                        ],
+                        how="vertical",
+                    )
+
         self.patch_size = patch_size
         self.crop = crop
         if crop not in ["grid", "random", "center"]:
@@ -168,9 +192,9 @@ class Sen2VenDataset(Dataset):
             item_path = self.df[idx]
             p1 = item_path[self.p0].to_numpy()[0]
             p2 = item_path[self.p1].to_numpy()[0]
-
-            p1 = os.path.join(self.dataset, p1)
-            p2 = os.path.join(self.dataset, p2)
+            dataset = item_path[self.p0].to_numpy()[0].split("_")[0]
+            p1 = os.path.join(dataset, p1)
+            p2 = os.path.join(dataset, p2)
 
             # Load the images using rasterio
             img1 = tifffile.imread(p1, ioworkers=6)

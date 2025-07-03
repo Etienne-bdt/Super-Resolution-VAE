@@ -12,6 +12,7 @@ slurm_logs/
 
 # Project-specific directories
 ARM/
+BAMBENW2/
 floods/
 
 *.png

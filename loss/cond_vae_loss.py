@@ -38,8 +38,14 @@ def cond_loss(
     """
     y_shape = recon_y.shape
     x_shape = recon_x.shape
-    n_y = y_shape[0] * y_shape[1] * y_shape[2] * y_shape[3]
-    n_x = x_shape[0] * x_shape[1] * x_shape[2] * x_shape[3]
+    if recon_x.ndim == 5:
+        x = x.expand(x_shape[0], -1, -1, -1, -1)
+        y = y.expand(y_shape[0], -1, -1, -1, -1)
+        n_y = y_shape[2] * y_shape[3] * y_shape[4]
+        n_x = x_shape[2] * x_shape[3] * x_shape[4]
+    else:
+        n_y = y_shape[1] * y_shape[2] * y_shape[3]
+        n_x = x_shape[1] * x_shape[2] * x_shape[3]
     mse_y = n_y * (
         F.mse_loss(recon_y, y, reduction="mean") / (2 * gammay.pow(2)) + (gammay.log())
     )
