@@ -203,7 +203,8 @@ class Sen2VenDataset(Dataset):
             img1 = torch.tensor(img1, dtype=torch.float32)
             img2 = torch.tensor(img2, dtype=torch.float32)
 
-            min_img, max_img = get_contrast(img2)
+            min_img, max_img = get_contrast(img1)
+            min_img, max_img = min_img - 1e-1, max_img + 1e-1
 
             img2 = (img2 - min_img) / (max_img - min_img)
             img1 = (img1 - min_img) / (max_img - min_img)
