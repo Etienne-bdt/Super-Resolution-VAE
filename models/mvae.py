@@ -507,6 +507,35 @@ class Multimodal_VAE(BaseVAE):
                         "x_hat": x_hat[:4, [2, 1, 0], :, :].clamp(0, 1),
                         "x_sr": x_sr[:4, [2, 1, 0], :, :].clamp(0, 1),
                     }
+                    wandb_run.log(
+                        {
+                            "Images/LR_Input": [
+                                wandb.Image(img.permute(1, 2, 0).cpu().numpy())
+                                for img in imgs["y"]
+                            ],
+                            "Images/HR_Input": [
+                                wandb.Image(img.permute(1, 2, 0).cpu().numpy())
+                                for img in imgs["x"]
+                            ],
+                            "Images/LR_Bicubic": [
+                                wandb.Image(img.permute(1, 2, 0).cpu().numpy())
+                                for img in imgs["y_bicubic"]
+                            ],
+                            "Images/LR_Recon": [
+                                wandb.Image(img.permute(1, 2, 0).cpu().numpy())
+                                for img in imgs["y_hat"]
+                            ],
+                            "Images/HR_Recon": [
+                                wandb.Image(img.permute(1, 2, 0).cpu().numpy())
+                                for img in imgs["x_hat"]
+                            ],
+                            "Images/SR_Output": [
+                                wandb.Image(img.permute(1, 2, 0).cpu().numpy())
+                                for img in imgs["x_sr"]
+                            ],
+                        },
+                        step=epoch,
+                    )
                     first = False
 
             # average metrics
@@ -534,32 +563,15 @@ class Multimodal_VAE(BaseVAE):
                 x_sr = self.conditional_generation(y)
 
             imgs = {
-                "y": y[:4, [2, 1, 0], :, :].clamp(0, 1),  # RGB channels
-                "x": x[:4, [2, 1, 0], :, :].clamp(0, 1),  # RGB channels
-                "y_bicubic": F.interpolate(y, scale_factor=2, mode="bicubic")[
-                    :4, [2, 1, 0], :, :
-                ].clamp(0, 1),  # Bicubic interpolation for y
                 "y_hat": y_hat[:4, [2, 1, 0], :, :].clamp(0, 1),
                 "x_hat": x_hat[:4, [2, 1, 0], :, :].clamp(0, 1),
                 "x_sr": x_sr[:4, [2, 1, 0], :, :].clamp(0, 1),
             }
 
-        if epoch % 10 == 0 or epoch == 1:
+        if epoch % 10 == 0:
             # log sample images
             wandb_run.log(
                 {
-                    "Images/LR_Input": [
-                        wandb.Image(img.permute(1, 2, 0).cpu().numpy())
-                        for img in imgs["y"]
-                    ],
-                    "Images/HR_Input": [
-                        wandb.Image(img.permute(1, 2, 0).cpu().numpy())
-                        for img in imgs["x"]
-                    ],
-                    "Images/LR_Bicubic": [
-                        wandb.Image(img.permute(1, 2, 0).cpu().numpy())
-                        for img in imgs["y_bicubic"]
-                    ],
                     "Images/LR_Recon": [
                         wandb.Image(img.permute(1, 2, 0).cpu().numpy())
                         for img in imgs["y_hat"]

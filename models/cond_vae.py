@@ -1,11 +1,12 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import wandb
 
-from loss import base_loss
+from loss import cond_loss
 
 from .base import BaseVAE
-from .layers import down_block, up_block
+from .layers import conv_block, down_block, up_block
 
 
 class Cond_VAE(BaseVAE):
@@ -27,7 +28,7 @@ class Cond_VAE(BaseVAE):
         super(Cond_VAE, self).__init__(patch_size, callbacks, slurm_job_id)
         self.cr = cr
         self.latent_size = (
-            int((patch_size * patch_size * 4 // self.cr) // 16) * 16
+            int((patch_size * patch_size * 4 // self.cr) // 64) * 64
         )  # Ensure latent size is a multiple of 4
         self.patch_size = patch_size
 
@@ -36,30 +37,15 @@ class Cond_VAE(BaseVAE):
         self.encoder = nn.Sequential(
             down_block(in_channels=4, out_channels=16),  # out 16 , 16 , 16
             down_block(in_channels=16, out_channels=64),  # out 64, 8, 8
-            nn.Conv2d(
-                in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1
-            ),
-            nn.Conv2d(
-                in_channels=64, out_channels=128, kernel_size=3, stride=1, padding=1
-            ),
-            nn.Conv2d(
-                in_channels=128, out_channels=128, kernel_size=3, stride=1, padding=1
-            ),
-            nn.Conv2d(
-                in_channels=128,
-                out_channels=(self.latent_size // 64)
-                * 2,  # Output channels for mu and logvar
-                kernel_size=3,
-                stride=1,
-                padding=1,
-            ),
+            conv_block(64, 128, 3, 1, 1),
+            conv_block(128, self.latent_size // 32, 3, 1, 1, final_relu=False),
             nn.Flatten(start_dim=1),  # Flatten to (batch_size, latent_size // 8)
             # out 512 * 2 * 2 = 2048
         )
 
         self.decoder = nn.Sequential(
             nn.Unflatten(
-                1, (self.latent_size // 64, patch_size // 2**2, patch_size // 2**2)
+                1, (self.latent_size // 64, patch_size // 2**3, patch_size // 2**3)
             ),
             up_block(
                 in_channels=self.latent_size // 64,
@@ -69,18 +55,14 @@ class Cond_VAE(BaseVAE):
                 in_channels=128,
                 out_channels=64,
             ),
-            nn.Conv2d(
-                in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1
-            ),
-            nn.Conv2d(
-                in_channels=64, out_channels=16, kernel_size=3, stride=1, padding=1
-            ),
-            nn.Conv2d(
-                in_channels=16, out_channels=16, kernel_size=3, stride=1, padding=1
-            ),
-            nn.Conv2d(
-                in_channels=16, out_channels=4, kernel_size=3, stride=1, padding=1
-            ),
+            conv_block(64, 64, 3, 1, 1),
+            conv_block(64, 16, 3, 1, 1),
+            conv_block(16, 12, 3, 1, 1),
+        )
+        self.decoder_end = nn.Sequential(
+            up_block(in_channels=16, out_channels=8),  # upsample to 8x8
+            conv_block(8, 8, 1, 1, 0),
+            conv_block(8, 4, 3, 1, 1, final_relu=False),
             nn.Sigmoid(),  # Ensure output is in [0, 1]
         )
         # 4 output channels (same as input)
@@ -97,20 +79,28 @@ class Cond_VAE(BaseVAE):
         eps = torch.randn_like(std)
         return mu + eps * std
 
-    def decode(self, z):
-        return self.decoder(z)
+    def decode(self, z, x):
+        z_decoded = self.decoder(z)
+        cat = torch.cat((z_decoded, x), dim=1)  # Concatenate with original input
+        return self.decoder_end(cat)
 
     def forward(self, x):
         # Forward pass through the VAE
         mu, logvar = self.encode(x)
         z = self.reparameterize(mu, logvar)
-        return self.decode(z), mu, logvar
+        return self.decode(z, x), mu, logvar
 
     def train_step(self, batch, device):
-        x, _ = batch
-        x = x.to(device)
-        x_hat, mu, logvar = self.forward(x)
-        mse, kld = base_loss(x_hat, x, mu, logvar, self.gamma)
+        x, y = batch
+        x, y = x.to(device), y.to(device)
+        y_hat, mu, logvar = self.forward(x)
+        mse, kld = cond_loss(
+            y_hat,
+            y,
+            mu,
+            logvar,
+            self.gamma,
+        )
         loss = mse + kld
         logs = {
             "Loss/loss": loss.item(),
@@ -120,13 +110,13 @@ class Cond_VAE(BaseVAE):
         return loss, logs
 
     def val_step(self, batch, device):
-        x, _ = batch
-        x = x.to(device)
+        x, y = batch
+        x, y = x.to(device), y.to(device)
         with torch.no_grad():
-            x_hat, mu, logvar = self.forward(x)
-            mse, kld = base_loss(
-                x_hat,
-                x,
+            y_hat, mu, logvar = self.forward(x)
+            mse, kld = cond_loss(
+                y_hat,
+                y,
                 mu,
                 logvar,
                 self.gamma,
@@ -142,6 +132,7 @@ class Cond_VAE(BaseVAE):
     def evaluate(self, val_loader, wandb_run, epoch, full_val=False):
         # VAE eval: aggregate SSIM & LPIPS over full validation set
         device = next(self.parameters()).device
+        first = epoch == 1
         if full_val:
             total_pixels = 0
             total_ssim = 0.0
@@ -149,16 +140,16 @@ class Cond_VAE(BaseVAE):
             first_batch = True
 
             for batch in val_loader:
-                x, _ = batch
-                x = x.to(device)
+                x, y = batch
+                x, y = x.to(device), y.to(device)
                 with torch.no_grad():
-                    x_hat, _, _ = self.forward(x)
+                    y_hat, _, _ = self.forward(x)
 
                 b = x.size(0)
                 total_pixels += b
 
                 # per-sample metrics
-                for orig, recon in zip(x, x_hat):
+                for orig, recon in zip(y, y_hat):
                     ssim = self.ssim(
                         orig.cpu().numpy(),
                         recon.cpu().numpy(),
@@ -173,8 +164,74 @@ class Cond_VAE(BaseVAE):
 
                 # capture first batch for image logging
                 if first_batch:
-                    imgs_in = x[:4]
-                    imgs_out = x_hat[:4]
+                    if first:
+                        imgs_in = x[:4].clamp(0, 1)
+                        bicubic = (
+                            F.interpolate(x, scale_factor=2, mode="bicubic")[
+                                :4, [2, 1, 0], :, :
+                            ].clamp(0, 1),
+                        )
+                        imgs_out = y_hat[:4].clamp(0, 1)
+                        imgs_gt = y[:4].clamp(0, 1)
+                        wandb_run.log(
+                            {
+                                "Images/Bicubic": [
+                                    wandb.Image(
+                                        img[[2, 1, 0], :, :]
+                                        .permute(1, 2, 0)
+                                        .cpu()
+                                        .numpy()
+                                    )
+                                    for img in bicubic
+                                ],
+                                "Images/Input": [
+                                    wandb.Image(
+                                        img[[2, 1, 0], :, :]
+                                        .permute(1, 2, 0)
+                                        .cpu()
+                                        .numpy()
+                                    )
+                                    for img in imgs_in
+                                ],
+                                "Images/Original": [
+                                    wandb.Image(
+                                        img[[2, 1, 0], :, :]
+                                        .permute(1, 2, 0)
+                                        .cpu()
+                                        .numpy()
+                                    )
+                                    for img in imgs_gt
+                                ],
+                                "Images/Reconstruction": [
+                                    wandb.Image(
+                                        img[[2, 1, 0], :, :]
+                                        .permute(1, 2, 0)
+                                        .cpu()
+                                        .numpy()
+                                    )
+                                    for img in imgs_out
+                                ],
+                            },
+                            step=epoch,
+                        )
+                        first = False
+                    else:
+                        imgs_in = x[:4].clamp(0, 1)
+                        imgs_out = y_hat[:4].clamp(0, 1)
+                        wandb_run.log(
+                            {
+                                "Images/Reconstruction": [
+                                    wandb.Image(
+                                        img[[2, 1, 0], :, :]
+                                        .permute(1, 2, 0)
+                                        .cpu()
+                                        .numpy()
+                                    )
+                                    for img in imgs_out
+                                ],
+                            },
+                            step=epoch,
+                        )
                     first_batch = False
 
             # compute averages
@@ -198,20 +255,11 @@ class Cond_VAE(BaseVAE):
                 imgs_out = x_hat[:4]
 
         # log sample images
-        if epoch % 5 == 0 or epoch == 1:
-            wandb_run.log(
-                {
-                    "Images/Input": [
-                        wandb.Image(img.permute(1, 2, 0).cpu().numpy())
-                        for img in imgs_in
-                    ],
-                },
-                step=epoch,
-            )
+        if epoch % 5 == 0:
             wandb_run.log(
                 {
                     "Images/Reconstruction": [
-                        wandb.Image(img.permute(1, 2, 0).cpu().numpy())
+                        wandb.Image(img[[2, 1, 0], :, :].permute(1, 2, 0).cpu().numpy())
                         for img in imgs_out
                     ],
                 },
@@ -238,7 +286,7 @@ class Cond_VAE(BaseVAE):
         x = x[0:1, :, :, :]
         return x, x
 
-    def sample(self, y, samples):
+    def sample(self, x, samples=1000):
         """
         Generate samples from the VAE given a condition y.
         Args:
@@ -247,10 +295,10 @@ class Cond_VAE(BaseVAE):
         Returns:
             torch.Tensor: Generated samples of shape (num_samples, 4, patch_size, patch_size).
         """
-        mu, logvar = self.encode(y)
+        mu, logvar = self.encode(x)
         z = torch.randn(samples, self.latent_size, device=y.device)
         z = mu + torch.exp(0.5 * logvar) * z
-        return self.decode(z).view(samples, 4, self.patch_size, self.patch_size)
+        return self.decode(z, x).view(samples, 4, self.patch_size, self.patch_size)
 
 
 if __name__ == "__main__":
