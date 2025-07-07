@@ -21,26 +21,27 @@ def init_dataloader(dataset: str, batch_size: int = 16, patch_size: int = 256):
         val_loader (DataLoader): The dataloader for the validation set.
     """
     if dataset == "Sen2Venus" or dataset == "sen2venus" or dataset == "s2v":
-        t_ds = Sen2VenDataset(patch_size)
-        v_ds = Sen2VenDataset(patch_size=patch_size, crop="center")
-
+        val_share = 0.2
+        t_ds = Sen2VenDataset(patch_size, val_share=val_share, val=False)
+        v_ds = Sen2VenDataset(
+            patch_size=patch_size, crop="center", val_share=val_share, val=True
+        )
     elif dataset == "Floods" or dataset == "floods":
         t_ds = FloodDataset(patch_size=256)
         v_ds = FloodDataset(patch_size=256)
+        val_share = 0.2
     else:
         raise ValueError(f"Unknown dataset: {dataset}")
-    train_size = int(0.8 * len(t_ds))
-    train_ds = torch.utils.data.Subset(t_ds, range(train_size))
-    val_ds = torch.utils.data.Subset(v_ds, range(train_size, len(v_ds)))
+
     train_loader = torch.utils.data.DataLoader(
-        train_ds,
+        t_ds,
         batch_size,
         shuffle=True,
         num_workers=6,
         persistent_workers=True,
     )
     val_loader = torch.utils.data.DataLoader(
-        val_ds,
+        v_ds,
         batch_size,
         shuffle=False,
         num_workers=6,
@@ -103,10 +104,20 @@ class FloodDataset(Dataset):
 
 
 class Sen2VenDataset(Dataset):
-    def __init__(self, patch_size=256, crop="random", dataset=None, bands="visu"):
+    def __init__(
+        self,
+        patch_size=256,
+        crop="random",
+        dataset=None,
+        bands="visu",
+        val_share=0.2,
+        val=False,
+    ):
         super(Sen2VenDataset, self).__init__()
         if dataset is None:
             dataset = ["ARM", "BAMBENW2"]
+            self.num_dataset = len(dataset)
+            self.per_ds_val_share = val_share / self.num_dataset
         if isinstance(dataset, str):
             self.dataset = os.path.join(os.getcwd(), dataset)
             csv_path = os.path.join(self.dataset, "index.csv")
@@ -119,6 +130,15 @@ class Sen2VenDataset(Dataset):
                         has_header=True,
                         separator="	",
                     )
+                    if val:
+                        self.df = self.df.tail(
+                            int(self.per_ds_val_share * len(self.df))
+                        )
+                        # Keep only val_share of the dataset
+                    else:
+                        self.df = self.df.head(
+                            -int(self.per_ds_val_share * len(self.df))
+                        )
                 else:
                     self.df = pl.concat(
                         [
@@ -127,7 +147,13 @@ class Sen2VenDataset(Dataset):
                                 os.path.join(os.getcwd(), d, "index.csv"),
                                 has_header=True,
                                 separator="	",
-                            ),
+                            ).head(-int(self.per_ds_val_share * len(self.df)))
+                            if not val
+                            else pl.read_csv(
+                                os.path.join(os.getcwd(), d, "index.csv"),
+                                has_header=True,
+                                separator="	",
+                            ).tail(int(self.per_ds_val_share * len(self.df))),
                         ],
                         how="vertical",
                     )
@@ -332,11 +358,11 @@ if __name__ == "__main__":
         print(f"Image 1 shape: {img1.shape}, Image 2 shape: {img2.shape}")
         plt.imsave(
             f"img1_{i}.png",
-            (img1[[2, 1, 0], :, :]).permute(1, 2, 0).numpy(),
+            (img1[[2, 1, 0], :, :]).clamp(0, 1).permute(1, 2, 0).numpy(),
         )
         plt.imsave(
             f"img2_{i}.png",
-            (img2[[2, 1, 0], :, :]).permute(1, 2, 0).numpy(),
+            (img2[[2, 1, 0], :, :]).clamp(0, 1).permute(1, 2, 0).numpy(),
         )
 
     plt.figure()
@@ -366,5 +392,8 @@ if __name__ == "__main__":
     train_loader, val_loader = init_dataloader(
         "Sen2Venus", batch_size=16, patch_size=64
     )
+    print(f"Number of training samples: {len(train_loader)}")
+    print(f"Number of validation samples: {len(val_loader)}")
+    print(f"Total number of samples: {len(train_loader) + len(val_loader)}")
     batch = next(iter(train_loader))
     print(f"Batch shape: {batch[0].shape}, {batch[1].shape}")
