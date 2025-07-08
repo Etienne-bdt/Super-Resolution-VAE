@@ -89,7 +89,9 @@ def save_img_histogram(image: torch.Tensor, filename: str) -> None:
         img = image[0]  # Take the first image in the batch
     elif image.ndim == 2:
         img = image.unsqueeze(0)
-    elif image.ndim != 3:
+    elif image.ndim == 3:
+        img = image
+    else:
         raise ValueError(
             "Input image must be a 2D (H, W), 3D (C, H, W) or 4D (B, C, H, W) tensor."
         )
