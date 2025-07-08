@@ -233,6 +233,7 @@ class Sen2VenDataset(Dataset):
 
             img2 = (img2 - min_img) / (max_img - min_img)
             img1 = (img1 - min_img) / (max_img - min_img)
+
             if self.transform:
                 if self.crop == "random":
                     img1, img2 = self.sr_randomcrop(img1, img2)

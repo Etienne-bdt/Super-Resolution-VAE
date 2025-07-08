@@ -76,6 +76,42 @@ def get_contrast(image: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     return (min_val, max_val)
 
 
+def save_img_histogram(image: torch.Tensor, filename: str) -> None:
+    """
+    Save the histogram of pixel values of the image tensor.
+    Args:
+        image (torch.Tensor): Input image tensor.
+        filename (str): Path to save the histogram image.
+    """
+    import matplotlib.pyplot as plt
+
+    if image.ndim == 4:
+        img = image[0]  # Take the first image in the batch
+    elif image.ndim == 2:
+        img = image.unsqueeze(0)
+    elif image.ndim != 3:
+        raise ValueError(
+            "Input image must be a 2D (H, W), 3D (C, H, W) or 4D (B, C, H, W) tensor."
+        )
+
+    for i in range(img.shape[0]):
+        plt.hist(
+            img[i].flatten().cpu().numpy(),
+            bins=256,
+            range=(0, 1),
+            alpha=0.5,
+            label=f"Channel {i}",
+        )
+
+    plt.title("Histogram of Pixel Values")
+    plt.xlabel("Pixel Value")
+    plt.ylabel("Frequency")
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(filename)
+    plt.close()
+
+
 class EarlyStopper:
     """
     Early stopping utility to stop training when validation loss does not improve.

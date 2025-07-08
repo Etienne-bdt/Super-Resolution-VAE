@@ -1,7 +1,10 @@
+import os
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import wandb
+from tqdm import tqdm
 
 from loss import cond_loss
 
@@ -34,10 +37,21 @@ class Cond_VAE(BaseVAE):
 
         self.gamma = torch.tensor(1.0, requires_grad=True)
 
-        self.encoder = nn.Sequential(
+        self.cond_prior = nn.Sequential(
             down_block(in_channels=4, out_channels=16),  # out 16 , 16 , 16
             down_block(in_channels=16, out_channels=64),  # out 64, 8, 8
             conv_block(64, 128, 3, 1, 1),
+            conv_block(128, self.latent_size // 32, 3, 1, 1, final_relu=False),
+            nn.Flatten(start_dim=1),  # Flatten to (batch_size, latent_size // 8)
+            # out 512 * 2 * 2 = 2048
+        )
+
+        self.hr_down = down_block(in_channels=4, out_channels=16)  # out 16 , 16 , 16
+
+        self.encoder = nn.Sequential(
+            down_block(in_channels=20, out_channels=64),  # out 64, 8, 8
+            down_block(64, 128),
+            conv_block(128, 128, 3, 1, 1),
             conv_block(128, self.latent_size // 32, 3, 1, 1, final_relu=False),
             nn.Flatten(start_dim=1),  # Flatten to (batch_size, latent_size // 8)
             # out 512 * 2 * 2 = 2048
@@ -68,10 +82,11 @@ class Cond_VAE(BaseVAE):
         # 4 output channels (same as input)
         self.num_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
 
-    def encode(self, x):
+    def encode(self, x, y):
         # Define the encoder part of the VAE
-        x = self.encoder(x)
-        return x.chunk(2, dim=1)  # Split into mu and logvar
+        x_encoded = self.hr_down(x)
+        stack = torch.cat((x_encoded, y), dim=1)  # Concatenate with condition y
+        return self.encoder(stack).chunk(2, dim=1)  # Split into mu and logvar
 
     def reparameterize(self, mu, logvar):
         # Reparameterization trick
@@ -79,26 +94,31 @@ class Cond_VAE(BaseVAE):
         eps = torch.randn_like(std)
         return mu + eps * std
 
-    def decode(self, z, x):
+    def decode(self, z, y):
         z_decoded = self.decoder(z)
-        cat = torch.cat((z_decoded, x), dim=1)  # Concatenate with original input
+        cat = torch.cat((z_decoded, y), dim=1)  # Concatenate with original input
         return self.decoder_end(cat)
 
-    def forward(self, x):
+    def forward(self, x, y):
         # Forward pass through the VAE
-        mu, logvar = self.encode(x)
+        mu, logvar = self.encode(x, y)
         z = self.reparameterize(mu, logvar)
-        return self.decode(z, x), mu, logvar
+        return self.decode(z, y), mu, logvar
 
     def train_step(self, batch, device):
-        x, y = batch
+        y, x = batch
         x, y = x.to(device), y.to(device)
-        y_hat, mu, logvar = self.forward(x)
+        x_hat, mu, logvar = self.forward(x, y)
+        cond_mu, cond_logvar = self.cond_prior(y).chunk(
+            2, dim=1
+        )  # Split into mu and logvar
         mse, kld = cond_loss(
-            y_hat,
-            y,
+            x_hat,
+            x,
             mu,
             logvar,
+            cond_mu,
+            cond_logvar,
             self.gamma,
         )
         loss = mse + kld
@@ -110,15 +130,20 @@ class Cond_VAE(BaseVAE):
         return loss, logs
 
     def val_step(self, batch, device):
-        x, y = batch
+        y, x = batch
         x, y = x.to(device), y.to(device)
         with torch.no_grad():
-            y_hat, mu, logvar = self.forward(x)
+            x_hat, mu, logvar = self.forward(x, y)
+            cond_mu, cond_logvar = self.cond_prior(y).chunk(
+                2, dim=1
+            )  # Split into mu and logvar
             mse, kld = cond_loss(
-                y_hat,
-                y,
+                x_hat,
+                x,
                 mu,
                 logvar,
+                cond_mu,
+                cond_logvar,
                 self.gamma,
             )
         loss = mse + kld
@@ -140,16 +165,16 @@ class Cond_VAE(BaseVAE):
             first_batch = True
 
             for batch in val_loader:
-                x, y = batch
+                y, x = batch
                 x, y = x.to(device), y.to(device)
                 with torch.no_grad():
-                    y_hat, _, _ = self.forward(x)
+                    x_hat, _, _ = self.forward(x, y)
 
                 b = x.size(0)
                 total_pixels += b
 
                 # per-sample metrics
-                for orig, recon in zip(y, y_hat):
+                for orig, recon in zip(x, x_hat):
                     ssim = self.ssim(
                         orig.cpu().numpy(),
                         recon.cpu().numpy(),
@@ -165,24 +190,19 @@ class Cond_VAE(BaseVAE):
                 # capture first batch for image logging
                 if first_batch:
                     if first:
-                        imgs_in = x[:4].clamp(0, 1)
+                        imgs_in = y[:4].clamp(0, 1)
                         bicubic = (
-                            F.interpolate(x, scale_factor=2, mode="bicubic")[
+                            F.interpolate(y, scale_factor=2, mode="bicubic")[
                                 :4, [2, 1, 0], :, :
                             ].clamp(0, 1),
                         )
-                        imgs_out = y_hat[:4].clamp(0, 1)
-                        imgs_gt = y[:4].clamp(0, 1)
+                        imgs_out = x_hat[:4].clamp(0, 1)
+                        imgs_gt = x[:4].clamp(0, 1)
                         wandb_run.log(
                             {
                                 "Images/Bicubic": [
-                                    wandb.Image(
-                                        img[[2, 1, 0], :, :]
-                                        .permute(1, 2, 0)
-                                        .cpu()
-                                        .numpy()
-                                    )
-                                    for img in bicubic
+                                    wandb.Image(img.permute(1, 2, 0).cpu().numpy())
+                                    for img in bicubic[0]
                                 ],
                                 "Images/Input": [
                                     wandb.Image(
@@ -216,8 +236,8 @@ class Cond_VAE(BaseVAE):
                         )
                         first = False
                     else:
-                        imgs_in = x[:4].clamp(0, 1)
-                        imgs_out = y_hat[:4].clamp(0, 1)
+                        imgs_in = y[:4].clamp(0, 1)
+                        imgs_out = x_hat[:4].clamp(0, 1)
                         wandb_run.log(
                             {
                                 "Images/Reconstruction": [
@@ -246,12 +266,12 @@ class Cond_VAE(BaseVAE):
 
         else:
             batch = next(iter(val_loader))
-            x, _ = batch
+            y, x = batch
             x = x.to(device)
-
+            y = y.to(device)
             with torch.no_grad():
-                x_hat, _, _ = self.forward(x)
-                imgs_in = x[:4]
+                x_hat, _, _ = self.forward(x, y)
+                imgs_in = y[:4]
                 imgs_out = x_hat[:4]
 
         # log sample images
@@ -279,14 +299,64 @@ class Cond_VAE(BaseVAE):
         self.gamma.requires_grad = True
         self.optimizer.add_param_group({"params": [self.gamma]})
 
+        val_loader = self.val_loader
+        device = next(self.parameters()).device
+
+        if os.path.exists("baseline_ckpt.pth"):
+            baseline = torch.load("baseline_ckpt.pth", weights_only=False)
+            self.ssim_base = baseline["ssim_base"]
+            self.lpips_base = baseline["lpips_base"]
+            print(
+                f"Baseline SSIM: {self.ssim_base}, LPIPS: {self.lpips_base}. Skipping baseline computation."
+            )
+            return
+        else:
+            ssim_cumu, lpips_cumu = 0, 0
+            for _, batch in tqdm(enumerate(val_loader)):
+                y_val, x_val = batch
+                y_val, x_val = y_val.to(device), x_val.to(device)
+
+                hr_interp = F.interpolate(y_val, scale_factor=2, mode="bicubic")
+
+                # Compute SSIM and LPIPS scores
+                for bcb, hr in zip(hr_interp, x_val):
+                    ssim_val = self.ssim(
+                        hr.cpu().numpy(),
+                        bcb.cpu().numpy(),
+                        win_size=11,
+                        data_range=1.0,
+                        channel_axis=0,
+                    )
+                    lpips = self.lpips_fn(
+                        hr[[2, 1, 0]].unsqueeze(0), bcb[[2, 1, 0]].unsqueeze(0)
+                    ).item()
+                    ssim_cumu += ssim_val
+                    lpips_cumu += lpips
+            self.ssim_base = ssim_cumu / (len(val_loader.dataset))
+            self.lpips_base = lpips_cumu / (len(val_loader.dataset))
+            torch.save(
+                {
+                    "ssim_base": self.ssim_base,
+                    "lpips_base": self.lpips_base,
+                },
+                "baseline_ckpt.pth",
+            )
+            print(
+                f"Baseline SSIM: {self.ssim_base}, LPIPS: {self.lpips_base}. Baseline computation complete."
+            )
+
     def get_task_data(self, val_loader):
         batch = next(iter(val_loader))
-        x, _ = batch
-        x = x.to(next(self.parameters()).device)
-        x = x[0:1, :, :, :]
-        return x, x
+        y, x = batch
+        x, y = (
+            x.to(next(self.parameters()).device),
+            y.to(next(self.parameters()).device),
+        )
+        x = x[0:1, :, :, :]  # Take the first sample from the batch
+        y = y[0:1, :, :, :]
+        return y, x
 
-    def sample(self, x, samples=1000):
+    def sample(self, y, samples=1000):
         """
         Generate samples from the VAE given a condition y.
         Args:
@@ -295,17 +365,21 @@ class Cond_VAE(BaseVAE):
         Returns:
             torch.Tensor: Generated samples of shape (num_samples, 4, patch_size, patch_size).
         """
-        mu, logvar = self.encode(x)
+        mu, logvar = self.cond_prior(y).chunk(2, dim=1)  # Split into mu and logvar
+        print(mu.shape, logvar.shape)
+        print(self.latent_size)
         z = torch.randn(samples, self.latent_size, device=y.device)
         z = mu + torch.exp(0.5 * logvar) * z
-        return self.decode(z, x).view(samples, 4, self.patch_size, self.patch_size)
+        y = y.expand(samples, -1, -1, -1)  # Expand x to match samples
+        return self.decode(z, y).view(samples, 4, self.patch_size, self.patch_size)
 
 
 if __name__ == "__main__":
     model = Cond_VAE(cr=1.5, patch_size=64)
     print(model)
     y = torch.randn(1, 4, 32, 32)
-    y_hat, mu, logvar = model.forward(y)
-    print("Output shape:", y_hat.shape)
+    x = torch.randn(1, 4, 64, 64)  # Example input tensor
+    x_hat, mu, logvar = model.forward(x, y)
+    print("Output shape:", x_hat.shape)
     print("Mu shape:", mu.shape)
     print("Logvar shape:", logvar.shape)
