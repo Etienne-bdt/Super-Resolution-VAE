@@ -55,6 +55,7 @@ def main(args):
             args.patch_size,
             callbacks=callbacks_list,
             slurm_job_id=slurm_job_id,
+            L=L,
         )
 
     else:

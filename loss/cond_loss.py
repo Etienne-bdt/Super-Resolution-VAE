@@ -5,7 +5,12 @@ import torch.nn.functional as F
 def cond_loss(recon_x, x, mu, logvar, cond_mu, cond_logvar, gamma):
     # Define the loss function for the VAE
     # Gamma is the variance of the prior
-    n_x = recon_x.shape[1] * recon_x.shape[2] * recon_x.shape[3]
+    x_shape = recon_x.shape
+    if recon_x.ndim == 5:
+        x = x.expand(x_shape[0], -1, -1, -1, -1)
+        n_x = x_shape[2] * x_shape[3] * x_shape[4]
+    else:
+        n_x = x_shape[1] * x_shape[2] * x_shape[3]
     mse = n_x * (
         F.mse_loss(recon_x, x, reduction="mean") / (2 * gamma.pow(2)) + (gamma.log())
     )

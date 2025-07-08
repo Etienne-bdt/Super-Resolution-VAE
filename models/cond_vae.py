@@ -25,11 +25,12 @@ class Cond_VAE(BaseVAE):
         callbacks (list, optional): List of callbacks to use during training (default: None).
     """
 
-    def __init__(self, cr, patch_size=64, callbacks=None, slurm_job_id="local"):
+    def __init__(self, cr, patch_size=64, callbacks=None, slurm_job_id="local", L=1):
         if callbacks is None:
             callbacks = []
         super(Cond_VAE, self).__init__(patch_size, callbacks, slurm_job_id)
         self.cr = cr
+        self.L: int = L  # Number of samples to draw from the latent space
         self.latent_size = (
             int((patch_size * patch_size * 4 // self.cr) // 64) * 64
         )  # Ensure latent size is a multiple of 4
@@ -88,9 +89,24 @@ class Cond_VAE(BaseVAE):
         stack = torch.cat((x_encoded, y), dim=1)  # Concatenate with condition y
         return self.encoder(stack).chunk(2, dim=1)  # Split into mu and logvar
 
-    def reparameterize(self, mu, logvar):
+    def reparameterize(self, mu, logvar, L):
+        """
+        Reparameterization trick to sample from the latent space.
+
+        Args:
+            mu (torch.Tensor): Mean of the latent distribution.
+            logvar (torch.Tensor): Log variance of the latent distribution.
+            L (int): Number of samples to draw from the latent space.
+        Returns:
+            torch.Tensor: Sampled latent vector of size (L, Batch, Latent_size).
+        """
         # Reparameterization trick
         std = torch.exp(0.5 * logvar)
+        if L > 1:
+            mu = mu.unsqueeze(0).expand(
+                L, -1, -1
+            )  # Expand mu to (L, Batch, Latent_size)
+            std = std.unsqueeze(0).expand(L, -1, -1)
         eps = torch.randn_like(std)
         return mu + eps * std
 
@@ -99,16 +115,22 @@ class Cond_VAE(BaseVAE):
         cat = torch.cat((z_decoded, y), dim=1)  # Concatenate with original input
         return self.decoder_end(cat)
 
-    def forward(self, x, y):
+    def forward(self, x, y, L=1):
         # Forward pass through the VAE
         mu, logvar = self.encode(x, y)
-        z = self.reparameterize(mu, logvar)
-        return self.decode(z, y), mu, logvar
+        z = self.reparameterize(mu, logvar, L)
+        if z.ndim == 3:
+            decoded = []
+            for i in range(L):
+                decoded.append(self.decode(z[i], y))
+                return torch.stack(decoded, dim=0), mu, logvar
+        else:
+            return self.decode(z, y), mu, logvar
 
     def train_step(self, batch, device):
         y, x = batch
         x, y = x.to(device), y.to(device)
-        x_hat, mu, logvar = self.forward(x, y)
+        x_hat, mu, logvar = self.forward(x, y, self.L)
         cond_mu, cond_logvar = self.cond_prior(y).chunk(
             2, dim=1
         )  # Split into mu and logvar
