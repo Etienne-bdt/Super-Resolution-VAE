@@ -72,7 +72,7 @@ class Cond_VAE(BaseVAE):
             ),
             conv_block(128, 64, 3, 1, 1),
             conv_block(64, 32, 1, 1, 0),
-            conv_block(16, 16, 1, 1, 0),
+            conv_block(32, 16, 1, 1, 0),
         )
         self.decoder_end = nn.Sequential(
             up_block(in_channels=20, out_channels=16),  # upsample to 8x8
