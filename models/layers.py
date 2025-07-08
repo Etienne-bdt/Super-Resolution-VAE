@@ -382,7 +382,6 @@ class conv_block(nn.Module):
         x = self.conv1(x)
         x = self.relu(x)
         x = self.conv2(x)
-        x = self.relu(x)
         x = x + inp
         x = self.conv3(x)
         return self.relu(x) if self.final_relu else x

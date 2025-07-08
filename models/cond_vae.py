@@ -42,7 +42,7 @@ class Cond_VAE(BaseVAE):
             down_block(in_channels=4, out_channels=16),  # out 16 , 16 , 16
             down_block(in_channels=16, out_channels=64),  # out 64, 8, 8
             conv_block(64, 128, 3, 1, 1),
-            conv_block(128, self.latent_size // 32, 3, 1, 1, final_relu=False),
+            conv_block(128, self.latent_size // 32, 1, 1, 0, final_relu=False),
             nn.Flatten(start_dim=1),  # Flatten to (batch_size, latent_size // 8)
             # out 512 * 2 * 2 = 2048
         )
@@ -53,7 +53,7 @@ class Cond_VAE(BaseVAE):
             down_block(in_channels=20, out_channels=64),  # out 64, 8, 8
             down_block(64, 128),
             conv_block(128, 128, 3, 1, 1),
-            conv_block(128, self.latent_size // 32, 3, 1, 1, final_relu=False),
+            conv_block(128, self.latent_size // 32, 1, 1, 0, final_relu=False),
             nn.Flatten(start_dim=1),  # Flatten to (batch_size, latent_size // 8)
             # out 512 * 2 * 2 = 2048
         )
@@ -64,26 +64,29 @@ class Cond_VAE(BaseVAE):
             ),
             up_block(
                 in_channels=self.latent_size // 64,
-                out_channels=128,
+                out_channels=256,
             ),
             up_block(
-                in_channels=128,
-                out_channels=64,
+                in_channels=256,
+                out_channels=128,
             ),
-            conv_block(64, 64, 3, 1, 1),
-            conv_block(64, 16, 3, 1, 1),
-            conv_block(16, 12, 3, 1, 1),
+            conv_block(128, 64, 3, 1, 1),
+            conv_block(64, 32, 1, 1, 0),
+            conv_block(16, 16, 1, 1, 0),
         )
         self.decoder_end = nn.Sequential(
-            up_block(in_channels=16, out_channels=8),  # upsample to 8x8
+            up_block(in_channels=20, out_channels=16),  # upsample to 8x8
+            conv_block(16, 8, 3, 1, 1),
             conv_block(8, 8, 1, 1, 0),
-            conv_block(8, 4, 3, 1, 1, final_relu=False),
+            conv_block(
+                8, 4, 1, 1, 0, final_relu=False
+            ),  # Final conv to match input channels
             nn.Sigmoid(),  # Ensure output is in [0, 1]
         )
         # 4 output channels (same as input)
         self.num_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
 
-    def encode(self, x, y):
+    def encode(self, x, y) -> tuple[torch.Tensor, torch.Tensor]:
         # Define the encoder part of the VAE
         x_encoded = self.hr_down(x)
         stack = torch.cat((x_encoded, y), dim=1)  # Concatenate with condition y
@@ -110,7 +113,7 @@ class Cond_VAE(BaseVAE):
         eps = torch.randn_like(std)
         return mu + eps * std
 
-    def decode(self, z, y):
+    def decode(self, z, y) -> torch.Tensor:
         z_decoded = self.decoder(z)
         cat = torch.cat((z_decoded, y), dim=1)  # Concatenate with original input
         return self.decoder_end(cat)
@@ -124,8 +127,7 @@ class Cond_VAE(BaseVAE):
             for i in range(L):
                 decoded.append(self.decode(z[i], y))
                 return torch.stack(decoded, dim=0), mu, logvar
-        else:
-            return self.decode(z, y), mu, logvar
+        return self.decode(z, y), mu, logvar
 
     def train_step(self, batch, device):
         y, x = batch
