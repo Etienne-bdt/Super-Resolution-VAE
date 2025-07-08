@@ -1,7 +1,7 @@
 import torch
 
-from loss import base_loss, cond_loss
-from models import VAE, Cond_SRVAE
+from loss import base_loss, multimodal_loss
+from models import VAE, Multimodal_VAE
 
 
 def test_vae_forward_and_loss_shapes():
@@ -24,7 +24,7 @@ def test_cond_vae_forward_and_loss_shapes():
     cr = 2
     patch_size = 16
     latent_size = int(4 * patch_size * patch_size // cr)
-    model = Cond_SRVAE(cr, patch_size=patch_size)
+    model = Multimodal_VAE(cr, patch_size=patch_size)
     x = torch.randn(2, 4, patch_size, patch_size)
     y = torch.randn(2, 4, patch_size // 2, patch_size // 2)
     x_hat, y_hat, mu_z, logvar_z, mu_u, logvar_u, mu_z_uy, logvar_z_uy = model(x, y)
@@ -32,7 +32,7 @@ def test_cond_vae_forward_and_loss_shapes():
     assert y_hat.shape == y.shape
     assert mu_u.shape == (2, latent_size // 4)
     assert mu_z.shape == (2, latent_size)
-    mse_x, kld_u, mse_y, kld_z = cond_loss(
+    mse_x, kld_u, mse_y, kld_z = multimodal_loss(
         x_hat,
         x,
         y_hat,

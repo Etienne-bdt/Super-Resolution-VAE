@@ -41,18 +41,25 @@ def main(args):
             callbacks=callbacks_list,
             slurm_job_id=slurm_job_id,
         )
-    elif args.model_type == "Cond_SRVAE":
-        model = models.Cond_SRVAE(
+    elif args.model_type == "MVAE":
+        model = models.Multimodal_VAE(
             cr,
             args.patch_size,
             callbacks=callbacks_list,
             slurm_job_id=slurm_job_id,
             L=L,
         )
+    elif args.model_type == "Cond_VAE":
+        model = models.Cond_VAE(
+            cr,
+            args.patch_size,
+            callbacks=callbacks_list,
+            slurm_job_id=slurm_job_id,
+        )
 
     else:
         raise ValueError(
-            f"Unknown model type: {args.model_type}. Choose 'Cond_SRVAE' or 'VAE'."
+            f"Unknown model type: {args.model_type}. Choose 'MVAE' or 'VAE'."
         )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -69,7 +76,7 @@ def main(args):
         # optimizer.load_state_dict(save_dict["optimizer_state_dict"])
         # print("Optimizer state loaded successfully.")
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=5e-5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
     start_epoch = 1
 
     if not (args.test and args.model_ckpt):
@@ -148,9 +155,9 @@ def parse_args():
     parser.add_argument(
         "--model_type",
         type=str,
-        default="Cond_SRVAE",
-        choices=["Cond_SRVAE", "VAE"],
-        help="Model to use : 'Cond_SRVAE' ou 'VAE'",
+        default="MVAE",
+        choices=["MVAE", "VAE", "Cond_VAE"],
+        help="Model to use : 'MVAE' ou 'VAE' ou 'Cond_VAE'.",
     )
 
     return parser.parse_args()

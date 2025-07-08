@@ -3,7 +3,7 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 
 import models.base as base_module
-from models.cond_vae import Cond_SRVAE
+from models.mvae import Multimodal_VAE
 from models.vae import VAE
 
 
@@ -53,7 +53,7 @@ def test_cond_vae_training_loop_runs_one_epoch():
     y_data = torch.randn(2, 4, patch_size // 2, patch_size // 2)
     ds = TensorDataset(y_data, x_data)
     loader = DataLoader(ds, batch_size=2)
-    model = Cond_SRVAE(cr, patch_size=patch_size)
+    model = Multimodal_VAE(cr, patch_size=patch_size)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     model.fit(
         train_loader=loader,
