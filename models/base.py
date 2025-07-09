@@ -12,7 +12,7 @@ from skimage import metrics as skmetrics
 from tqdm import tqdm
 
 from callbacks import Callback
-from utils import get_contrast, save_img_histogram
+from utils import save_img_histogram
 
 
 class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
@@ -303,18 +303,12 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
         os.makedirs(results_dir, exist_ok=True)
 
         pred, target = self.get_task_data(val_loader)
-        pred_min, pred_max = get_contrast(pred)
-
-        pred = (pred - pred_min) / (pred_max - pred_min)
-        target = (target - pred_min) / (pred_max - pred_min)
 
         with torch.no_grad():
             samples = self.sample(pred)
 
         save_img_histogram(pred, f"{results_dir}/input_image_histogram.png")
         save_img_histogram(target, f"{results_dir}/target_image_histogram.png")
-
-        # Compute error map of samples and GT x
         diff = samples - target
         mean = samples.mean(dim=0).cpu().numpy()
         std = samples.std(dim=0).cpu().numpy().mean(axis=0)

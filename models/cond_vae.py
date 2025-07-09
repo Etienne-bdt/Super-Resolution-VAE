@@ -36,8 +36,6 @@ class Cond_VAE(BaseVAE):
         )  # Ensure latent size is a multiple of 4
         self.patch_size = patch_size
 
-        self.gamma = torch.tensor(1.0, requires_grad=True)
-
         self.cond_prior = nn.Sequential(
             down_block(in_channels=4, out_channels=16),  # out 16 , 16 , 16
             down_block(in_channels=16, out_channels=64),  # out 64, 8, 8
@@ -83,6 +81,32 @@ class Cond_VAE(BaseVAE):
             ),  # Final conv to match input channels
             nn.Sigmoid(),  # Ensure output is in [0, 1]
         )
+
+        self.variance_decoder = nn.Sequential(
+            nn.Unflatten(
+                1, (self.latent_size // 64, patch_size // 2**3, patch_size // 2**3)
+            ),
+            up_block(
+                in_channels=self.latent_size // 64,
+                out_channels=256,
+            ),
+            up_block(
+                in_channels=256,
+                out_channels=128,
+            ),
+            up_block(
+                in_channels=128,
+                out_channels=64,
+            ),
+            conv_block(64, 32, 3, 1, 1),
+            conv_block(32, 16, 1, 1, 0),
+            conv_block(16, 8, 1, 1, 0),
+            conv_block(
+                8, 4, 1, 1, 0, final_relu=False
+            ),  # Final conv to match input channels
+            nn.Sigmoid(),  # Ensure output is in [0, 1]
+        )
+
         # 4 output channels (same as input)
         self.num_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
 
@@ -126,13 +150,20 @@ class Cond_VAE(BaseVAE):
             decoded = []
             for i in range(L):
                 decoded.append(self.decode(z[i], y))
-                return torch.stack(decoded, dim=0), mu, logvar
-        return self.decode(z, y), mu, logvar
+                return (
+                    torch.stack(decoded, dim=0),
+                    mu,
+                    logvar,
+                    self.variance_decoder(z.mean(dim=0)),
+                )
+
+        return self.decode(z, y), mu, logvar, self.variance_decoder(z)
 
     def train_step(self, batch, device):
         y, x = batch
         x, y = x.to(device), y.to(device)
-        x_hat, mu, logvar = self.forward(x, y, self.L)
+        x_hat, mu, logvar, gamma = self.forward(x, y, self.L)
+        self.gamma = gamma
         cond_mu, cond_logvar = self.cond_prior(y).chunk(
             2, dim=1
         )  # Split into mu and logvar
@@ -157,7 +188,8 @@ class Cond_VAE(BaseVAE):
         y, x = batch
         x, y = x.to(device), y.to(device)
         with torch.no_grad():
-            x_hat, mu, logvar = self.forward(x, y)
+            x_hat, mu, logvar, gamma = self.forward(x, y)
+            self.gamma = gamma
             cond_mu, cond_logvar = self.cond_prior(y).chunk(
                 2, dim=1
             )  # Split into mu and logvar
@@ -192,7 +224,7 @@ class Cond_VAE(BaseVAE):
                 y, x = batch
                 x, y = x.to(device), y.to(device)
                 with torch.no_grad():
-                    x_hat, _, _ = self.forward(x, y)
+                    x_hat, _, _, _ = self.forward(x, y)
 
                 b = x.size(0)
                 total_pixels += b
@@ -294,7 +326,7 @@ class Cond_VAE(BaseVAE):
             x = x.to(device)
             y = y.to(device)
             with torch.no_grad():
-                x_hat, _, _ = self.forward(x, y)
+                x_hat, _, _, _ = self.forward(x, y)
                 imgs_in = y[:4]
                 imgs_out = x_hat[:4]
 
@@ -313,16 +345,21 @@ class Cond_VAE(BaseVAE):
     def on_train_epoch_end(self, **kwargs):
         self.wandb_run.log(
             {
-                "HyperParameters/Gamma": self.gamma.item(),
                 "HyperParameters/Learning Rate": self.scheduler.get_last_lr()[0],
+                "HyperParameters/Gamma": [
+                    wandb.Image(
+                        gamma[[2, 1, 0], :, :].permute(1, 2, 0).cpu().detach().numpy()
+                    )
+                    for gamma in self.gamma[:4]
+                ],
             },
             step=self.current_epoch,
         )
 
     def on_train_start(self, **kwargs):
-        self.gamma.requires_grad = True
+        """self.gamma.requires_grad = True
         self.optimizer.add_param_group({"params": [self.gamma]})
-
+        """
         val_loader = self.val_loader
         device = next(self.parameters()).device
 
@@ -376,8 +413,8 @@ class Cond_VAE(BaseVAE):
             x.to(next(self.parameters()).device),
             y.to(next(self.parameters()).device),
         )
-        x = x[0:1, :, :, :]  # Take the first sample from the batch
-        y = y[0:1, :, :, :]
+        x = x[1:2, :, :, :]  # Take the first sample from the batch
+        y = y[1:2, :, :, :]
         return y, x
 
     def sample(self, y, samples=1000):
@@ -403,7 +440,7 @@ if __name__ == "__main__":
     print(model)
     y = torch.randn(1, 4, 32, 32)
     x = torch.randn(1, 4, 64, 64)  # Example input tensor
-    x_hat, mu, logvar = model.forward(x, y)
+    x_hat, mu, logvar, _ = model.forward(x, y)
     print("Output shape:", x_hat.shape)
     print("Mu shape:", mu.shape)
     print("Logvar shape:", logvar.shape)
