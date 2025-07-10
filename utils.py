@@ -1,6 +1,7 @@
 from typing import Tuple
 
 import torch
+import torch.nn.functional as F
 
 
 def normalize_image(image: torch.Tensor) -> torch.Tensor:
@@ -149,3 +150,34 @@ class EarlyStopper:
             if self.counter >= self.patience:
                 return True
         return False
+
+
+def icp(samples: torch.Tensor, gt: torch.Tensor, quantiles: torch.Tensor):
+    """
+    Compute the empirical quantiles of the mean squared error per pixel.
+    Args:
+        samples (torch.Tensor): Samples from the model (N, C, H, W).
+        gt (torch.Tensor): Ground truth image (C, H, W).
+        quantiles (torch.Tensor): Quantiles to compute.
+    Returns:
+        Tuple: Empirical coverage and quantiles map.
+    """
+    b, c, h, w = samples.shape
+    x_mmse = samples.mean(dim=0, keepdim=True)[0]  # (1, C, H, W)
+    persample_mse = (
+        F.mse_loss(x_mmse.unsqueeze(0).expand(b, -1, -1, -1), samples, reduction="none")
+        .mean(1)
+        .view(b, -1)
+    )  # b, h*w
+    distances, _ = torch.sort(persample_mse, dim=0)  # (N, npixels)
+
+    # Vectorized computation of distance limits and empirical coverage
+    distance_limits = torch.clamp((b * quantiles).long(), 0, b - 1)  # (num_quantiles,)
+    distance_thresholds = distances[distance_limits]  # (num_quantiles, npixels)
+
+    mse = F.mse_loss(x_mmse, gt[0], reduction="none").mean(0).view(h * w)  # (h*w)
+    # Compute empirical coverage for all quantiles at once
+    empirical_coverage = (mse.unsqueeze(0) < distance_thresholds).float().mean(dim=(1))
+    empirical_coverage[-1] = 1.0
+
+    return empirical_coverage

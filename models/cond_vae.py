@@ -224,8 +224,7 @@ class Cond_VAE(BaseVAE):
                 y, x = batch
                 x, y = x.to(device), y.to(device)
                 with torch.no_grad():
-                    x_hat, _, _, _ = self.forward(x, y)
-
+                    x_hat = self.sample(y, y.shape[0])
                 b = x.size(0)
                 total_pixels += b
 
@@ -287,6 +286,16 @@ class Cond_VAE(BaseVAE):
                                     )
                                     for img in imgs_out
                                 ],
+                                "HyperParameters/Gamma": [
+                                    wandb.Image(
+                                        gamma[[2, 1, 0], :, :]
+                                        .permute(1, 2, 0)
+                                        .cpu()
+                                        .detach()
+                                        .numpy()
+                                    )
+                                    for gamma in self.gamma[:4]
+                                ],
                             },
                             step=epoch,
                         )
@@ -304,6 +313,16 @@ class Cond_VAE(BaseVAE):
                                         .numpy()
                                     )
                                     for img in imgs_out
+                                ],
+                                "HyperParameters/Gamma": [
+                                    wandb.Image(
+                                        gamma[[2, 1, 0], :, :]
+                                        .permute(1, 2, 0)
+                                        .cpu()
+                                        .detach()
+                                        .numpy()
+                                    )
+                                    for gamma in self.gamma[:4]
                                 ],
                             },
                             step=epoch,
@@ -346,12 +365,6 @@ class Cond_VAE(BaseVAE):
         self.wandb_run.log(
             {
                 "HyperParameters/Learning Rate": self.scheduler.get_last_lr()[0],
-                "HyperParameters/Gamma": [
-                    wandb.Image(
-                        gamma[[2, 1, 0], :, :].permute(1, 2, 0).cpu().detach().numpy()
-                    )
-                    for gamma in self.gamma[:4]
-                ],
             },
             step=self.current_epoch,
         )
@@ -427,12 +440,16 @@ class Cond_VAE(BaseVAE):
             torch.Tensor: Generated samples of shape (num_samples, 4, patch_size, patch_size).
         """
         mu, logvar = self.cond_prior(y).chunk(2, dim=1)  # Split into mu and logvar
-        print(mu.shape, logvar.shape)
-        print(self.latent_size)
         z = torch.randn(samples, self.latent_size, device=y.device)
         z = mu + torch.exp(0.5 * logvar) * z
-        y = y.expand(samples, -1, -1, -1)  # Expand x to match samples
-        return self.decode(z, y).view(samples, 4, self.patch_size, self.patch_size)
+        self.gamma = self.variance_decoder(z)
+        if y.shape[0] == 1:
+            y = y.expand(samples, -1, -1, -1)  # Expand x to match samples
+        mean_decode = self.decode(z, y).view(
+            samples, 4, self.patch_size, self.patch_size
+        )
+
+        return mean_decode + torch.randn_like(mean_decode) * self.gamma
 
 
 if __name__ == "__main__":

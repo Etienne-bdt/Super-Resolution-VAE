@@ -12,7 +12,7 @@ from skimage import metrics as skmetrics
 from tqdm import tqdm
 
 from callbacks import Callback
-from utils import save_img_histogram
+from utils import icp, save_img_histogram
 
 
 class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
@@ -315,9 +315,30 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
         mae = diff.abs().mean(dim=(0, 1)).cpu().numpy()
         mse = (diff.pow(2)).mean(dim=(0, 1)).cpu().numpy()
 
+        pred_bicubic = nn.functional.interpolate(
+            pred, scale_factor=2, mode="bicubic", align_corners=False
+        )
+
+        quantiles = torch.arange(
+            0,
+            1.05,
+            0.05,
+        ).to(pred.device)
+        empirical_coverage = icp(samples, target, quantiles)
+
+        plt.figure()
+        plt.plot(quantiles.cpu().numpy(), empirical_coverage.cpu().numpy(), marker="o")
+        plt.xlabel("Quantiles")
+        plt.ylabel("Empirical Coverage")
+        plt.plot([0, 1], [0, 1], linestyle="--", color="red", label="Ideal Coverage")
+        plt.title("Empirical Coverage vs Quantiles")
+        plt.legend()
+        plt.savefig(f"{results_dir}/empirical_coverage.png", bbox_inches="tight")
+        plt.close()
+
         plt.figure(figsize=(20, 10))
         plt.subplot(2, 4, 1)
-        plt.imshow(pred[0, [2, 1, 0], :, :].cpu().numpy().transpose(1, 2, 0))
+        plt.imshow(pred_bicubic[0, [2, 1, 0], :, :].cpu().numpy().transpose(1, 2, 0))
         plt.title("Input Image")
         plt.subplot(2, 4, 2)
         plt.imshow(samples[0, [2, 1, 0], :, :].cpu().numpy().transpose(1, 2, 0))
