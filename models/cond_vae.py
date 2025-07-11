@@ -35,12 +35,12 @@ class Cond_VAE(BaseVAE):
         self.patch_size = patch_size
 
         self.cond_prior = nn.Sequential(
-            down_block(in_channels=4, out_channels=16),  # out 16 , 16 , 16
-            down_block(in_channels=16, out_channels=64),  # out 64, 8, 8
-            conv_block(64, 128, 3, 1, 1),
+            down_block(in_channels=4, out_channels=64),  # out 16 , 16 , 16
+            down_block(in_channels=64, out_channels=128),  # out 64, 8, 8
+            conv_block(128, 256, 3, 1, 1),
             conv_block(
-                128,
-                int(512 / (2 * self.adjust)) * 4,
+                256,
+                int(512 / (2 * self.adjust)) * 8,
                 1,
                 1,
                 0,
@@ -482,6 +482,7 @@ class Cond_VAE(BaseVAE):
 if __name__ == "__main__":
     model = Cond_VAE(cr=1.5, patch_size=64)
     print(model)
+    print(model.adjust)
     y = torch.randn(1, 4, 32, 32)
     x = torch.randn(1, 4, 64, 64)  # Example input tensor
     x_hat, mu, logvar, _ = model.forward(x, y)
