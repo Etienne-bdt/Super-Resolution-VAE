@@ -12,7 +12,7 @@ from skimage import metrics as skmetrics
 from tqdm import tqdm
 
 from callbacks import Callback
-from utils import icp, save_img_histogram
+from utils import icp, quantile_map
 
 
 class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
@@ -307,14 +307,10 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
         with torch.no_grad():
             samples = self.sample(pred)
 
-        save_img_histogram(pred, f"{results_dir}/input_image_histogram.png")
-        save_img_histogram(target, f"{results_dir}/target_image_histogram.png")
-        diff = samples - target
+        # save_img_histogram(pred, f"{results_dir}/input_image_histogram.png")
+        # save_img_histogram(target, f"{results_dir}/target_image_histogram.png")
         mean = samples.mean(dim=0).cpu().numpy()
         std = samples.std(dim=0).cpu().numpy().mean(axis=0)
-        mae = diff.abs().mean(dim=(0, 1)).cpu().numpy()
-        mse = (diff.pow(2)).mean(dim=(0, 1)).cpu().numpy()
-
         pred_bicubic = nn.functional.interpolate(
             pred, scale_factor=2, mode="bicubic", align_corners=False
         )
@@ -326,6 +322,7 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
         ).to(pred.device)
         empirical_coverage = icp(samples, target, quantiles)
 
+        quantile_90 = quantile_map(samples, 0.9)
         plt.figure()
         plt.plot(quantiles.cpu().numpy(), empirical_coverage.cpu().numpy(), marker="o")
         plt.xlabel("Quantiles")
@@ -350,21 +347,17 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
         plt.imshow(mean[[2, 1, 0], :, :].transpose(1, 2, 0))
         plt.title("Mean of Samples")
         plt.subplot(2, 4, 5)
-        mean_bias = (target - samples.mean(dim=0)).mean(dim=0).mean(dim=0).cpu().numpy()
+        mean_bias = (target - samples.mean(dim=0))[0].mean(dim=0).cpu().numpy()
         plt.imshow(mean_bias, cmap="twilight")
         lim = max(abs(mean_bias.min()), abs(mean_bias.max()))
         plt.clim(-lim, lim)
         plt.colorbar()
-        plt.title(f"Mean Bias Map, Mean: {mean_bias.mean():.2f}")
+        plt.title(f"Erreur MMSE-GT, Mean: {mean_bias.mean():.2f}")
         plt.subplot(2, 4, 6)
-        plt.imshow(mae, cmap="hot")
+        plt.imshow(quantile_90.cpu())
         plt.colorbar()
-        plt.title("MAE Map")
+        plt.title("90th Percentile Quantile Map")
         plt.subplot(2, 4, 7)
-        plt.imshow(mse, cmap="hot")
-        plt.colorbar()
-        plt.title("MSE Map")
-        plt.subplot(2, 4, 8)
         plt.imshow(std, cmap="hot")
         plt.colorbar()
         plt.title(f"STD of Samples, Mean: {std.mean():.2f}")

@@ -181,3 +181,30 @@ def icp(samples: torch.Tensor, gt: torch.Tensor, quantiles: torch.Tensor):
     empirical_coverage[-1] = 1.0
 
     return empirical_coverage
+
+
+def quantile_map(samples: torch.Tensor, quantile: float) -> torch.Tensor:
+    """
+    Compute the quantile map for the given samples and a given quantile.
+
+    Args:
+        samples (torch.Tensor): Samples from the model (N, C, H, W).
+        quantile (float): Quantile to compute (between 0 and 1).
+
+    Returns:
+        torch.Tensor: Quantile map of shape (C, H, W).
+    """
+    b, c, h, w = samples.shape
+    x_mmse = samples.mean(dim=0, keepdim=True)[0]  # (1, C, H, W)
+    persample_mse = (
+        F.mse_loss(x_mmse.unsqueeze(0).expand(b, -1, -1, -1), samples, reduction="none")
+        .mean(1)
+        .view(b, -1)
+    )  # b, h*w
+    distances, _ = torch.sort(persample_mse, dim=0)  # (N, npixels)
+
+    # Vectorized computation of distance limits and empirical coverage
+    distance_limit = int((b * quantile))  # (1)
+    distance_thresholds = distances[distance_limit]  # (npixels)
+
+    return distance_thresholds.view(h, w)  # (h, w)

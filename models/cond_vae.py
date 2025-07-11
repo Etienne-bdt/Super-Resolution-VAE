@@ -31,16 +31,21 @@ class Cond_VAE(BaseVAE):
         super(Cond_VAE, self).__init__(patch_size, callbacks, slurm_job_id)
         self.cr = cr
         self.L: int = L  # Number of samples to draw from the latent space
-        self.latent_size = (
-            int((patch_size * patch_size * 4 // self.cr) // 64) * 64
-        )  # Ensure latent size is a multiple of 4
+        self.adjust = int(4 // self.cr)  # Ensure latent size is a multiple of 4
         self.patch_size = patch_size
 
         self.cond_prior = nn.Sequential(
             down_block(in_channels=4, out_channels=16),  # out 16 , 16 , 16
             down_block(in_channels=16, out_channels=64),  # out 64, 8, 8
             conv_block(64, 128, 3, 1, 1),
-            conv_block(128, self.latent_size // 32, 1, 1, 0, final_relu=False),
+            conv_block(
+                128,
+                int(512 / (2 * self.adjust)) * 4,
+                1,
+                1,
+                0,
+                final_relu=False,
+            ),
             nn.Flatten(start_dim=1),  # Flatten to (batch_size, latent_size // 8)
             # out 512 * 2 * 2 = 2048
         )
@@ -50,18 +55,30 @@ class Cond_VAE(BaseVAE):
         self.encoder = nn.Sequential(
             down_block(in_channels=20, out_channels=64),  # out 64, 8, 8
             down_block(64, 128),
-            conv_block(128, 128, 3, 1, 1),
-            conv_block(128, self.latent_size // 32, 1, 1, 0, final_relu=False),
+            conv_block(128, 256, 3, 1, 1),
+            conv_block(
+                256,
+                int(512 / (2 * self.adjust)) * 4,
+                1,
+                1,
+                0,
+                final_relu=False,
+            ),
             nn.Flatten(start_dim=1),  # Flatten to (batch_size, latent_size // 8)
             # out 512 * 2 * 2 = 2048
         )
 
         self.decoder = nn.Sequential(
             nn.Unflatten(
-                1, (self.latent_size // 64, patch_size // 2**3, patch_size // 2**3)
+                1,
+                (
+                    int(512 / (2 * self.adjust)) * 2,
+                    patch_size // 2**3,
+                    patch_size // 2**3,
+                ),
             ),
             up_block(
-                in_channels=self.latent_size // 64,
+                in_channels=int(512 / (2 * self.adjust)) * 2,
                 out_channels=256,
             ),
             up_block(
@@ -84,10 +101,15 @@ class Cond_VAE(BaseVAE):
 
         self.variance_decoder = nn.Sequential(
             nn.Unflatten(
-                1, (self.latent_size // 64, patch_size // 2**3, patch_size // 2**3)
+                1,
+                (
+                    int(512 / (2 * self.adjust)) * 2,
+                    patch_size // 2**3,
+                    patch_size // 2**3,
+                ),
             ),
             up_block(
-                in_channels=self.latent_size // 64,
+                in_channels=int(512 / (2 * self.adjust)) * 2,
                 out_channels=256,
             ),
             up_block(
@@ -224,7 +246,7 @@ class Cond_VAE(BaseVAE):
                 y, x = batch
                 x, y = x.to(device), y.to(device)
                 with torch.no_grad():
-                    x_hat = self.sample(y, y.shape[0])
+                    x_hat = self.sample(y, y.shape[0], gamma_added=False)
                 b = x.size(0)
                 total_pixels += b
 
@@ -430,7 +452,7 @@ class Cond_VAE(BaseVAE):
         y = y[1:2, :, :, :]
         return y, x
 
-    def sample(self, y, samples=1000):
+    def sample(self, y, samples=100, gamma_added=True):
         """
         Generate samples from the VAE given a condition y.
         Args:
@@ -440,16 +462,21 @@ class Cond_VAE(BaseVAE):
             torch.Tensor: Generated samples of shape (num_samples, 4, patch_size, patch_size).
         """
         mu, logvar = self.cond_prior(y).chunk(2, dim=1)  # Split into mu and logvar
-        z = torch.randn(samples, self.latent_size, device=y.device)
+        _, _, h, w = y.shape
+        z = torch.randn(
+            samples, int(int(256 / (self.adjust * 2)) * 2 * h * w / 16), device=y.device
+        )
         z = mu + torch.exp(0.5 * logvar) * z
-        self.gamma = self.variance_decoder(z)
+        if gamma_added:
+            self.gamma = self.variance_decoder(z)
         if y.shape[0] == 1:
             y = y.expand(samples, -1, -1, -1)  # Expand x to match samples
-        mean_decode = self.decode(z, y).view(
-            samples, 4, self.patch_size, self.patch_size
+        mean_decode = self.decode(z, y)
+        return (
+            mean_decode + torch.randn_like(mean_decode) * self.gamma
+            if gamma_added
+            else mean_decode
         )
-
-        return mean_decode + torch.randn_like(mean_decode) * self.gamma
 
 
 if __name__ == "__main__":
