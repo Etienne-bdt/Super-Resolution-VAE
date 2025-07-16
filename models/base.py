@@ -306,7 +306,9 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
 
         with torch.no_grad():
             samples = self.sample(pred)
-
+            if type(self).__name__ == "Cond_VAE":
+                gamma = self.gamma[0, :, :, :].mean(0)
+                normed_gamma = (gamma - gamma.min()) / (gamma.max() - gamma.min())
         # save_img_histogram(pred, f"{results_dir}/input_image_histogram.png")
         # save_img_histogram(target, f"{results_dir}/target_image_histogram.png")
         mean = samples.mean(dim=0).cpu().numpy()
@@ -333,7 +335,7 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
         plt.savefig(f"{results_dir}/empirical_coverage.png", bbox_inches="tight")
         plt.close()
 
-        plt.figure(figsize=(20, 10))
+        plt.figure()
         plt.subplot(2, 4, 1)
         plt.imshow(pred_bicubic[0, [2, 1, 0], :, :].cpu().numpy().transpose(1, 2, 0))
         plt.title("Input Image")
@@ -361,6 +363,11 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
         plt.imshow(std, cmap="hot")
         plt.colorbar()
         plt.title(f"STD of Samples, Mean: {std.mean():.2f}")
+        if "gamma" in locals():
+            plt.subplot(2, 4, 8)
+            plt.imshow(normed_gamma.cpu().numpy(), cmap="hot")
+            plt.colorbar()
+            plt.title("Gamma Map")
         plt.savefig(f"{results_dir}/error_mean_std_maps.png", bbox_inches="tight")
         plt.close()
         MMSE = (samples - target).pow(2).mean()

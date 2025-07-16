@@ -40,7 +40,7 @@ class Cond_VAE(BaseVAE):
             conv_block(128, 256, 3, 1, 1),
             conv_block(
                 256,
-                int(512 / (2 * self.adjust)) * 8,
+                int(512 / (2 * self.adjust)) * 4,
                 1,
                 1,
                 0,
@@ -464,11 +464,10 @@ class Cond_VAE(BaseVAE):
         mu, logvar = self.cond_prior(y).chunk(2, dim=1)  # Split into mu and logvar
         _, _, h, w = y.shape
         z = torch.randn(
-            samples, int(int(256 / (self.adjust * 2)) * 2 * h * w / 16), device=y.device
+            samples, int(int(512 / (self.adjust * 2)) * 2 * h * w / 16), device=y.device
         )
         z = mu + torch.exp(0.5 * logvar) * z
-        if gamma_added:
-            self.gamma = self.variance_decoder(z)
+        self.gamma = self.variance_decoder(z)
         if y.shape[0] == 1:
             y = y.expand(samples, -1, -1, -1)  # Expand x to match samples
         mean_decode = self.decode(z, y)
@@ -486,6 +485,11 @@ if __name__ == "__main__":
     y = torch.randn(1, 4, 32, 32)
     x = torch.randn(1, 4, 64, 64)  # Example input tensor
     x_hat, mu, logvar, _ = model.forward(x, y)
+    cond_mu, cond_logvar = model.cond_prior(y).chunk(
+        2, dim=1
+    )  # Split into mu and logvar
     print("Output shape:", x_hat.shape)
     print("Mu shape:", mu.shape)
     print("Logvar shape:", logvar.shape)
+    print("Cond Mu shape:", cond_mu.shape)
+    print("Cond Logvar shape:", cond_logvar.shape)
