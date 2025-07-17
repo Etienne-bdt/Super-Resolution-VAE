@@ -5,6 +5,7 @@ from typing import List
 
 import lpips
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import torch.nn as nn
 import wandb
@@ -311,7 +312,7 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
                 normed_gamma = (gamma - gamma.min()) / (gamma.max() - gamma.min())
         # save_img_histogram(pred, f"{results_dir}/input_image_histogram.png")
         # save_img_histogram(target, f"{results_dir}/target_image_histogram.png")
-        mean = samples.mean(dim=0).cpu().numpy()
+        mean = samples.mean(dim=0)
         std = samples.std(dim=0).cpu().numpy().mean(axis=0)
         pred_bicubic = nn.functional.interpolate(
             pred, scale_factor=2, mode="bicubic", align_corners=False
@@ -335,48 +336,114 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
         plt.savefig(f"{results_dir}/empirical_coverage.png", bbox_inches="tight")
         plt.close()
 
-        plt.figure()
-        plt.subplot(2, 4, 1)
-        plt.imshow(pred_bicubic[0, [2, 1, 0], :, :].cpu().numpy().transpose(1, 2, 0))
-        plt.title("Input Image")
-        plt.subplot(2, 4, 2)
-        plt.imshow(samples[0, [2, 1, 0], :, :].cpu().numpy().transpose(1, 2, 0))
-        plt.title("Sampled Image")
-        plt.subplot(2, 4, 3)
-        plt.imshow(target[0, [2, 1, 0], :, :].cpu().numpy().transpose(1, 2, 0))
-        plt.title("Ground Truth Image")
-        plt.subplot(2, 4, 4)
-        plt.imshow(mean[[2, 1, 0], :, :].transpose(1, 2, 0))
-        plt.title("Mean of Samples")
-        plt.subplot(2, 4, 5)
+        plt.imsave(
+            f"{results_dir}/input_image.png",
+            pred_bicubic[0, [2, 1, 0], :, :]
+            .clip(0, 1)
+            .cpu()
+            .numpy()
+            .transpose(1, 2, 0),
+        )
+        plt.imsave(
+            f"{results_dir}/sampled_image.png",
+            samples[0, [2, 1, 0], :, :].clip(0, 1).cpu().numpy().transpose(1, 2, 0),
+        )
+        plt.imsave(
+            f"{results_dir}/ground_truth_image.png",
+            target[0, [2, 1, 0], :, :].clip(0, 1).cpu().numpy().transpose(1, 2, 0),
+        )
+        plt.imsave(
+            f"{results_dir}/mean_of_samples.png",
+            mean[[2, 1, 0], :, :].clip(0, 1).cpu().numpy().transpose(1, 2, 0),
+        )
+
         mean_bias = (target - samples.mean(dim=0))[0].mean(dim=0).cpu().numpy()
-        plt.imshow(mean_bias, cmap="twilight")
         lim = max(abs(mean_bias.min()), abs(mean_bias.max()))
-        plt.clim(-lim, lim)
-        plt.colorbar()
-        plt.title(f"Erreur MMSE-GT, Mean: {mean_bias.mean():.2f}")
-        plt.subplot(2, 4, 6)
-        plt.imshow(quantile_90.cpu())
-        plt.colorbar()
-        plt.title("90th Percentile Quantile Map")
-        plt.subplot(2, 4, 7)
-        plt.imshow(std, cmap="hot")
-        plt.colorbar()
-        plt.title(f"STD of Samples, Mean: {std.mean():.2f}")
+
+        # Create a figure with subplots
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+
+        # Mean bias plot
+        im1 = axes[0, 0].imshow(mean_bias, cmap="twilight", vmin=-lim, vmax=lim)
+        axes[0, 0].set_title("Mean Bias")
+        axes[0, 0].axis("off")
+        plt.colorbar(im1, ax=axes[0, 0])
+
+        # Quantile 90 plot
+        im2 = axes[0, 1].imshow(quantile_90.squeeze().cpu().numpy(), cmap="viridis")
+        axes[0, 1].set_title("Quantile 90")
+        axes[0, 1].axis("off")
+        plt.colorbar(im2, ax=axes[0, 1])
+
+        # Standard deviation plot
+        im3 = axes[1, 0].imshow(std, cmap="hot")
+        axes[1, 0].set_title("Standard Deviation")
+        axes[1, 0].axis("off")
+        plt.colorbar(im3, ax=axes[1, 0])
+
+        # Gamma map plot (if available)
         if "gamma" in locals():
-            plt.subplot(2, 4, 8)
-            plt.imshow(normed_gamma.cpu().numpy(), cmap="hot")
-            plt.colorbar()
-            plt.title("Gamma Map")
-        plt.savefig(f"{results_dir}/error_mean_std_maps.png", bbox_inches="tight")
+            im4 = axes[1, 1].imshow(normed_gamma.cpu().numpy(), cmap="hot")
+            axes[1, 1].set_title("Gamma Map")
+            axes[1, 1].axis("off")
+            plt.colorbar(im4, ax=axes[1, 1])
+        else:
+            axes[1, 1].axis("off")
+
+        plt.tight_layout()
+        plt.savefig(
+            f"{results_dir}/error_mean_std_maps.png", bbox_inches="tight", dpi=150
+        )
         plt.close()
-        MMSE = (samples - target).pow(2).mean()
-        print(f"MMSE: {MMSE:.4f}")
+
+        normed_std = (std - std.min()) / (std.max() - std.min())
+        abs_bias = abs(mean_bias)
+        normed_bias = (abs_bias - abs_bias.min()) / (abs_bias.max() - abs_bias.min())
+
+        xor = normed_std + normed_bias - 2 * normed_std * normed_bias
+        xor = np.clip(xor, 0, 1)  # Ensure values are between 0 and 1
+        plt.imsave(f"{results_dir}/xor_mean_bias_std.png", xor, cmap="viridis")
+
+        SSIM_MMSE = self.ssim(
+            mean[[2, 1, 0], :, :].cpu().numpy(),
+            target[0, [2, 1, 0], :, :].cpu().numpy(),
+            data_range=1.0,
+            multichannel=True,
+            channel_axis=0,
+        )
+        print(f"SSIM MMSE: {SSIM_MMSE:.4f}")
+
+        SSIM_samples = self.ssim(
+            samples[0, [2, 1, 0], :, :].cpu().numpy(),
+            target[0, [2, 1, 0], :, :].cpu().numpy(),
+            data_range=1.0,
+            multichannel=True,
+            channel_axis=0,
+        )
+        print(f"SSIM Samples: {SSIM_samples:.4f}")
+
+        SSIM_bicubic = self.ssim(
+            pred_bicubic[0, [2, 1, 0], :, :].cpu().numpy(),
+            target[0, [2, 1, 0], :, :].cpu().numpy(),
+            data_range=1.0,
+            multichannel=True,
+            channel_axis=0,
+        )
+        print(f"SSIM Bicubic: {SSIM_bicubic:.4f}")
+
+        E_MMSE_GT = (mean - target[0]).pow(2).mean()
+        print(f"E_MMSE-GT: {E_MMSE_GT:.4f}")
+
+        E_samples_GT = (samples - target).pow(2).mean()
+        print(f"E_samples-GT: {E_samples_GT:.4f}")
+
+        E_bicubic_GT = (pred_bicubic - target).pow(2).mean()
+        print(f"E_bicubic-GT: {E_bicubic_GT:.4f}")
 
         if hasattr(self, "wandb_run") and self.wandb_run is not None:
             self.wandb_run.log(
                 {
-                    "Metrics/MMSE": MMSE,
+                    "Metrics/MMSE": E_samples_GT,
                     "Plots/Error Maps": wandb.Image(
                         f"{results_dir}/error_mean_std_maps.png"
                     ),

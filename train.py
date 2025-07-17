@@ -32,7 +32,7 @@ def main(args):
         callbacks.EarlyStopping(patience=25, delta=0.01),
     ]
 
-    L = 10
+    L = 1
 
     if args.model_type == "VAE":
         model = models.VAE(

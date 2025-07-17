@@ -229,10 +229,10 @@ class down_block(nn.Module):
         self.with_relu = with_relu
         self.with_bn = with_bn
         self.conv = nn.Conv2d(
-            in_channels, in_channels, kernel_size=1, stride=1, padding=0
+            in_channels, in_channels, kernel_size=3, stride=1, padding=1
         )
         self.conv2 = nn.Conv2d(
-            in_channels, in_channels, kernel_size=1, stride=1, padding=0
+            in_channels, in_channels, kernel_size=3, stride=1, padding=1
         )
         self.downsample = nn.Conv2d(
             in_channels, out_channels, kernel_size=2, stride=2, padding=0
@@ -281,10 +281,10 @@ class up_block(nn.Module):
         self.with_relu = with_relu
         self.with_bn = with_bn
         self.conv = nn.Conv2d(
-            in_channels, in_channels, kernel_size=1, stride=1, padding=0
+            in_channels, in_channels, kernel_size=3, stride=1, padding=1
         )
         self.conv2 = nn.Conv2d(
-            in_channels, in_channels, kernel_size=1, stride=1, padding=0
+            in_channels, in_channels, kernel_size=3, stride=1, padding=1
         )
         self.upsample = nn.ConvTranspose2d(
             in_channels, out_channels, kernel_size=4, stride=2, padding=1
@@ -358,9 +358,9 @@ class conv_block(nn.Module):
         self.conv3 = nn.Conv2d(
             in_channels,
             out_channels,
-            kernel_size=1,
-            stride=1,
-            padding=0,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
         )
 
         self.relu = nn.LeakyReLU()

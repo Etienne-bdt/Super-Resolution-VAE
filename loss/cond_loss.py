@@ -36,7 +36,7 @@ def cond_loss(recon_x, x, mu, logvar, cond_mu, cond_logvar, gamma):
     kld = (
         0.5
         * (
-            torch.sum(cond_logvar - logvar - 1, dim=1)
+            torch.sum(cond_logvar - logvar - torch.ones_like(logvar), dim=1)
             + torch.sum((logvar - cond_logvar).exp(), dim=1)
             + torch.sum((mu - cond_mu).pow(2) * ((-cond_logvar).exp()), dim=1)
         ).mean()

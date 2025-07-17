@@ -200,7 +200,7 @@ def quantile_map(samples: torch.Tensor, quantile: float) -> torch.Tensor:
         F.mse_loss(x_mmse.unsqueeze(0).expand(b, -1, -1, -1), samples, reduction="none")
         .mean(1)
         .view(b, -1)
-    )  # b, h*w
+    ).sqrt()  # b, h*w
     distances, _ = torch.sort(persample_mse, dim=0)  # (N, npixels)
 
     # Vectorized computation of distance limits and empirical coverage

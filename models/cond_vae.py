@@ -40,7 +40,7 @@ class Cond_VAE(BaseVAE):
             conv_block(128, 256, 3, 1, 1),
             conv_block(
                 256,
-                int(512 / (2 * self.adjust)) * 4,
+                int(256 / (2 * self.adjust)) * 4,
                 1,
                 1,
                 0,
@@ -58,7 +58,7 @@ class Cond_VAE(BaseVAE):
             conv_block(128, 256, 3, 1, 1),
             conv_block(
                 256,
-                int(512 / (2 * self.adjust)) * 4,
+                int(256 / (2 * self.adjust)) * 4,
                 1,
                 1,
                 0,
@@ -72,13 +72,13 @@ class Cond_VAE(BaseVAE):
             nn.Unflatten(
                 1,
                 (
-                    int(512 / (2 * self.adjust)) * 2,
+                    int(256 / (2 * self.adjust)) * 2,
                     patch_size // 2**3,
                     patch_size // 2**3,
                 ),
             ),
             up_block(
-                in_channels=int(512 / (2 * self.adjust)) * 2,
+                in_channels=int(256 / (2 * self.adjust)) * 2,
                 out_channels=256,
             ),
             up_block(
@@ -103,13 +103,13 @@ class Cond_VAE(BaseVAE):
             nn.Unflatten(
                 1,
                 (
-                    int(512 / (2 * self.adjust)) * 2,
+                    int(256 / (2 * self.adjust)) * 2,
                     patch_size // 2**3,
                     patch_size // 2**3,
                 ),
             ),
             up_block(
-                in_channels=int(512 / (2 * self.adjust)) * 2,
+                in_channels=int(256 / (2 * self.adjust)) * 2,
                 out_channels=256,
             ),
             up_block(
@@ -367,7 +367,7 @@ class Cond_VAE(BaseVAE):
             x = x.to(device)
             y = y.to(device)
             with torch.no_grad():
-                x_hat, _, _, _ = self.forward(x, y)
+                x_hat = self.sample(y, y.shape[0], gamma_added=False)
                 imgs_in = y[:4]
                 imgs_out = x_hat[:4]
 
@@ -448,8 +448,8 @@ class Cond_VAE(BaseVAE):
             x.to(next(self.parameters()).device),
             y.to(next(self.parameters()).device),
         )
-        x = x[1:2, :, :, :]  # Take the first sample from the batch
-        y = y[1:2, :, :, :]
+        x = x[2:3, :, :, :]  # Take the first sample from the batch
+        y = y[2:3, :, :, :]
         return y, x
 
     def sample(self, y, samples=100, gamma_added=True):
@@ -464,7 +464,7 @@ class Cond_VAE(BaseVAE):
         mu, logvar = self.cond_prior(y).chunk(2, dim=1)  # Split into mu and logvar
         _, _, h, w = y.shape
         z = torch.randn(
-            samples, int(int(512 / (self.adjust * 2)) * 2 * h * w / 16), device=y.device
+            samples, int(int(256 / (self.adjust * 2)) * 2 * h * w / 16), device=y.device
         )
         z = mu + torch.exp(0.5 * logvar) * z
         self.gamma = self.variance_decoder(z)
