@@ -307,7 +307,9 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
 
         with torch.no_grad():
             samples = self.sample(pred)
-            if type(self).__name__ == "Cond_VAE":
+            if self.gamma_type == "scalar":
+                gamma = self.gamma
+            else:
                 gamma = self.gamma[0, :, :, :].mean(0)
                 normed_gamma = (gamma - gamma.min()) / (gamma.max() - gamma.min())
         # save_img_histogram(pred, f"{results_dir}/input_image_histogram.png")
@@ -382,7 +384,7 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
         plt.colorbar(im3, ax=axes[1, 0])
 
         # Gamma map plot (if available)
-        if "gamma" in locals():
+        if "gamma" in locals() and self.gamma_type != "scalar":
             im4 = axes[1, 1].imshow(normed_gamma.cpu().numpy(), cmap="hot")
             axes[1, 1].set_title("Gamma Map")
             axes[1, 1].axis("off")

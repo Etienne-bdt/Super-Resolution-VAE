@@ -48,6 +48,7 @@ def main(args):
             callbacks=callbacks_list,
             slurm_job_id=slurm_job_id,
             L=L,
+            gamma_type=args.gamma_type,
         )
     elif args.model_type == "Cond_VAE":
         model = models.Cond_VAE(

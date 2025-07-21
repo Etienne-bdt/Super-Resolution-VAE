@@ -176,7 +176,7 @@ class Cond_VAE(BaseVAE):
         cat = torch.cat((z_decoded, y), dim=1)  # Concatenate with original input
         return self.decoder_end(cat)
 
-    def decoder_variance(self, z):
+    def decoder_variance(self, z) -> torch.Tensor:
         if self.gamma_type == "scalar":
             return self.gamma
         else:
@@ -423,7 +423,6 @@ class Cond_VAE(BaseVAE):
     def on_train_start(self, **kwargs):
         if self.gamma_type == "scalar":
             self.gamma.requires_grad = True
-            self.optimizer.add_param_group({"params": [self.gamma]})
 
         val_loader = self.val_loader
         device = next(self.parameters()).device

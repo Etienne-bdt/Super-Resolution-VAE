@@ -41,18 +41,76 @@ def multimodal_loss(
     if recon_x.ndim == 5:
         x = x.expand(x_shape[0], -1, -1, -1, -1)
         y = y.expand(y_shape[0], -1, -1, -1, -1)
-        n_y = y_shape[2] * y_shape[3] * y_shape[4]
-        n_x = x_shape[2] * x_shape[3] * x_shape[4]
+
+    # Compute MSE per pixel for both x and y
+    mse_y_per_pixel = F.mse_loss(recon_y, y, reduction="none").to(gammay.device)
+    mse_x_per_pixel = F.mse_loss(recon_x, x, reduction="none").to(gammax.device)
+
+    # Handle gamma reshaping for both scalar and vector cases
+    if gammax.ndim == 1:
+        # Scalar gamma - use original logic
+        if recon_x.ndim == 5:
+            n_y = y_shape[2] * y_shape[3] * y_shape[4]
+            n_x = x_shape[2] * x_shape[3] * x_shape[4]
+        else:
+            n_y = y_shape[1] * y_shape[2] * y_shape[3]
+            n_x = x_shape[1] * x_shape[2] * x_shape[3]
+        mse_y = n_y * (
+            F.mse_loss(recon_y, y, reduction="mean") / (2 * gammay.pow(2))
+            + gammay.log()
+        )
+        mse_x = n_x * (
+            F.mse_loss(recon_x, x, reduction="mean") / (2 * gammax.pow(2))
+            + gammax.log()
+        )
     else:
-        n_y = y_shape[1] * y_shape[2] * y_shape[3]
-        n_x = x_shape[1] * x_shape[2] * x_shape[3]
-    mse_y = n_y * (
-        F.mse_loss(recon_y, y, reduction="mean") / (2 * gammay.pow(2)) + (gammay.log())
-    )
+        # Vector gamma - apply spatial weighting
+        # Reshape gamma to match the spatial dimensions
+        gammay_reshaped = (
+            gammay.view(y_shape[1], y_shape[2], y_shape[3], y_shape[4]).to(
+                gammay.device
+            )
+            if recon_y.ndim == 5
+            else gammay.view(y_shape[0], y_shape[1], y_shape[2], y_shape[3]).to(
+                gammay.device
+            )
+        )
+
+        gammax_reshaped = (
+            gammax.view(x_shape[1], x_shape[2], x_shape[3], x_shape[4]).to(
+                gammax.device
+            )
+            if recon_x.ndim == 5
+            else gammax.view(x_shape[0], x_shape[1], x_shape[2], x_shape[3]).to(
+                gammax.device
+            )
+        )
+
+        # Apply diagonal gamma weighting for y
+        if recon_y.ndim == 5:
+            mse_y = torch.sum(
+                mse_y_per_pixel / (2 * gammay_reshaped.pow(2)) + gammay_reshaped.log(),
+                dim=(2, 3, 4),  # Sum over spatial dimensions
+            ).mean()  # Average over batch and L dimensions
+        else:
+            mse_y = torch.sum(
+                mse_y_per_pixel / (2 * gammay_reshaped.pow(2)) + gammay_reshaped.log(),
+                dim=(1, 2, 3),  # Sum over spatial dimensions
+            ).mean()
+
+        # Apply diagonal gamma weighting for x
+        if recon_x.ndim == 5:
+            mse_x = torch.sum(
+                mse_x_per_pixel / (2 * gammax_reshaped.pow(2)) + gammax_reshaped.log(),
+                dim=(2, 3, 4),  # Sum over spatial dimensions
+            ).mean()  # Average over batch and L dimensions
+        else:
+            mse_x = torch.sum(
+                mse_x_per_pixel / (2 * gammax_reshaped.pow(2)) + gammax_reshaped.log(),
+                dim=(1, 2, 3),  # Sum over spatial dimensions
+            ).mean()
+
     kld_u = 0.5 * torch.sum(mu1.pow(2) + logvar1.exp() - 1 - logvar1, dim=1).mean()
-    mse_x = n_x * (
-        F.mse_loss(recon_x, x, reduction="mean") / (2 * gammax.pow(2)) + (gammax.log())
-    )
     kld_z = (
         0.5
         * (
