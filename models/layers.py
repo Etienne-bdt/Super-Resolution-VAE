@@ -235,7 +235,7 @@ class down_block(nn.Module):
             in_channels, in_channels, kernel_size=3, stride=1, padding=1
         )
         self.downsample = nn.Conv2d(
-            in_channels, out_channels, kernel_size=4, stride=2, padding=1
+            in_channels, out_channels, kernel_size=2, stride=2, padding=0
         )
         self.bn_in = nn.BatchNorm2d(in_channels)
         self.bn = nn.BatchNorm2d(out_channels)
@@ -255,8 +255,7 @@ class down_block(nn.Module):
         x = self.conv(x)
         # if self.with_bn:
         #    x = self.bn_in(x)
-        if self.with_relu:
-            x = self.relu(x)
+        x = self.relu(x)
         x = self.conv2(x)
         x = x + inp  # Residual connection
         x = self.relu(x) if self.with_relu else x
@@ -308,8 +307,7 @@ class up_block(nn.Module):
         x = self.conv(x)
         # if self.with_bn:
         #    x = self.bn_in(x)
-        if self.with_relu:
-            x = self.relu(x)
+        x = self.relu(x)
         x = self.conv2(x)
         x = x + inp  # Residual connection
         x = self.relu(x) if self.with_relu else x

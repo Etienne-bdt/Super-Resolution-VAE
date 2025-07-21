@@ -32,7 +32,7 @@ def main(args):
         callbacks.EarlyStopping(patience=25, delta=0.01),
     ]
 
-    L = 10
+    L = 1
 
     if args.model_type == "VAE":
         model = models.VAE(
@@ -55,6 +55,7 @@ def main(args):
             args.patch_size,
             callbacks=callbacks_list,
             slurm_job_id=slurm_job_id,
+            L=L,
         )
 
     else:

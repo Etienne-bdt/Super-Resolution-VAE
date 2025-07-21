@@ -25,23 +25,27 @@ class Cond_VAE(BaseVAE):
         callbacks (list, optional): List of callbacks to use during training (default: None).
     """
 
-    def __init__(self, cr, patch_size=64, callbacks=None, slurm_job_id="local"):
+    def __init__(self, cr, patch_size=64, callbacks=None, slurm_job_id="local", L=1):
         if callbacks is None:
             callbacks = []
         super(Cond_VAE, self).__init__(patch_size, callbacks, slurm_job_id)
         self.cr = cr
-        self.latent_size = (
-            int((patch_size * patch_size * 4 // self.cr) // 64) * 64
-        )  # Ensure latent size is a multiple of 4
+        self.L: int = L  # Number of samples to draw from the latent space
+        self.adjust = int(4 // self.cr)  # Ensure latent size is a multiple of 4
         self.patch_size = patch_size
 
-        self.gamma = torch.tensor(1.0, requires_grad=True)
-
         self.cond_prior = nn.Sequential(
-            down_block(in_channels=4, out_channels=16),  # out 16 , 16 , 16
-            down_block(in_channels=16, out_channels=64),  # out 64, 8, 8
-            conv_block(64, 128, 3, 1, 1),
-            conv_block(128, self.latent_size // 32, 3, 1, 1, final_relu=False),
+            down_block(in_channels=4, out_channels=64),  # out 16 , 16 , 16
+            down_block(in_channels=64, out_channels=128),  # out 64, 8, 8
+            conv_block(128, 256, 3, 1, 1),
+            conv_block(
+                256,
+                int(256 / (2 * self.adjust)) * 4,
+                1,
+                1,
+                0,
+                final_relu=False,
+            ),
             nn.Flatten(start_dim=1),  # Flatten to (batch_size, latent_size // 8)
             # out 512 * 2 * 2 = 2048
         )
@@ -51,64 +55,137 @@ class Cond_VAE(BaseVAE):
         self.encoder = nn.Sequential(
             down_block(in_channels=20, out_channels=64),  # out 64, 8, 8
             down_block(64, 128),
-            conv_block(128, 128, 3, 1, 1),
-            conv_block(128, self.latent_size // 32, 3, 1, 1, final_relu=False),
+            conv_block(128, 256, 3, 1, 1),
+            conv_block(
+                256,
+                int(256 / (2 * self.adjust)) * 4,
+                1,
+                1,
+                0,
+                final_relu=False,
+            ),
             nn.Flatten(start_dim=1),  # Flatten to (batch_size, latent_size // 8)
             # out 512 * 2 * 2 = 2048
         )
 
         self.decoder = nn.Sequential(
             nn.Unflatten(
-                1, (self.latent_size // 64, patch_size // 2**3, patch_size // 2**3)
+                1,
+                (
+                    int(256 / (2 * self.adjust)) * 2,
+                    patch_size // 2**3,
+                    patch_size // 2**3,
+                ),
             ),
             up_block(
-                in_channels=self.latent_size // 64,
+                in_channels=int(256 / (2 * self.adjust)) * 2,
+                out_channels=256,
+            ),
+            up_block(
+                in_channels=256,
+                out_channels=128,
+            ),
+            conv_block(128, 64, 3, 1, 1),
+            conv_block(64, 32, 1, 1, 0),
+            conv_block(32, 16, 1, 1, 0),
+        )
+        self.decoder_end = nn.Sequential(
+            up_block(in_channels=20, out_channels=16),  # upsample to 8x8
+            conv_block(16, 8, 3, 1, 1),
+            conv_block(8, 8, 1, 1, 0),
+            conv_block(
+                8, 4, 1, 1, 0, final_relu=False
+            ),  # Final conv to match input channels
+            nn.Sigmoid(),  # Ensure output is in [0, 1]
+        )
+
+        self.variance_decoder = nn.Sequential(
+            nn.Unflatten(
+                1,
+                (
+                    int(256 / (2 * self.adjust)) * 2,
+                    patch_size // 2**3,
+                    patch_size // 2**3,
+                ),
+            ),
+            up_block(
+                in_channels=int(256 / (2 * self.adjust)) * 2,
+                out_channels=256,
+            ),
+            up_block(
+                in_channels=256,
                 out_channels=128,
             ),
             up_block(
                 in_channels=128,
                 out_channels=64,
             ),
-            conv_block(64, 64, 3, 1, 1),
-            conv_block(64, 16, 3, 1, 1),
-            conv_block(16, 12, 3, 1, 1),
-        )
-        self.decoder_end = nn.Sequential(
-            up_block(in_channels=16, out_channels=8),  # upsample to 8x8
-            conv_block(8, 8, 1, 1, 0),
-            conv_block(8, 4, 3, 1, 1, final_relu=False),
+            conv_block(64, 32, 3, 1, 1),
+            conv_block(32, 16, 1, 1, 0),
+            conv_block(16, 8, 1, 1, 0),
+            conv_block(
+                8, 4, 1, 1, 0, final_relu=False
+            ),  # Final conv to match input channels
             nn.Sigmoid(),  # Ensure output is in [0, 1]
         )
+
         # 4 output channels (same as input)
         self.num_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
 
-    def encode(self, x, y):
+    def encode(self, x, y) -> tuple[torch.Tensor, torch.Tensor]:
         # Define the encoder part of the VAE
         x_encoded = self.hr_down(x)
         stack = torch.cat((x_encoded, y), dim=1)  # Concatenate with condition y
         return self.encoder(stack).chunk(2, dim=1)  # Split into mu and logvar
 
-    def reparameterize(self, mu, logvar):
+    def reparameterize(self, mu, logvar, L):
+        """
+        Reparameterization trick to sample from the latent space.
+
+        Args:
+            mu (torch.Tensor): Mean of the latent distribution.
+            logvar (torch.Tensor): Log variance of the latent distribution.
+            L (int): Number of samples to draw from the latent space.
+        Returns:
+            torch.Tensor: Sampled latent vector of size (L, Batch, Latent_size).
+        """
         # Reparameterization trick
         std = torch.exp(0.5 * logvar)
+        if L > 1:
+            mu = mu.unsqueeze(0).expand(
+                L, -1, -1
+            )  # Expand mu to (L, Batch, Latent_size)
+            std = std.unsqueeze(0).expand(L, -1, -1)
         eps = torch.randn_like(std)
         return mu + eps * std
 
-    def decode(self, z, y):
+    def decode(self, z, y) -> torch.Tensor:
         z_decoded = self.decoder(z)
         cat = torch.cat((z_decoded, y), dim=1)  # Concatenate with original input
         return self.decoder_end(cat)
 
-    def forward(self, x, y):
+    def forward(self, x, y, L=1):
         # Forward pass through the VAE
         mu, logvar = self.encode(x, y)
-        z = self.reparameterize(mu, logvar)
-        return self.decode(z, y), mu, logvar
+        z = self.reparameterize(mu, logvar, L)
+        if z.ndim == 3:
+            decoded = []
+            for i in range(L):
+                decoded.append(self.decode(z[i], y))
+                return (
+                    torch.stack(decoded, dim=0),
+                    mu,
+                    logvar,
+                    self.variance_decoder(z.mean(dim=0)),
+                )
+
+        return self.decode(z, y), mu, logvar, self.variance_decoder(z)
 
     def train_step(self, batch, device):
         y, x = batch
         x, y = x.to(device), y.to(device)
-        x_hat, mu, logvar = self.forward(x, y)
+        x_hat, mu, logvar, gamma = self.forward(x, y, self.L)
+        self.gamma = gamma
         cond_mu, cond_logvar = self.cond_prior(y).chunk(
             2, dim=1
         )  # Split into mu and logvar
@@ -133,7 +210,8 @@ class Cond_VAE(BaseVAE):
         y, x = batch
         x, y = x.to(device), y.to(device)
         with torch.no_grad():
-            x_hat, mu, logvar = self.forward(x, y)
+            x_hat, mu, logvar, gamma = self.forward(x, y)
+            self.gamma = gamma
             cond_mu, cond_logvar = self.cond_prior(y).chunk(
                 2, dim=1
             )  # Split into mu and logvar
@@ -168,8 +246,7 @@ class Cond_VAE(BaseVAE):
                 y, x = batch
                 x, y = x.to(device), y.to(device)
                 with torch.no_grad():
-                    x_hat, _, _ = self.forward(x, y)
-
+                    x_hat = self.sample(y, y.shape[0], gamma_added=False)
                 b = x.size(0)
                 total_pixels += b
 
@@ -231,6 +308,16 @@ class Cond_VAE(BaseVAE):
                                     )
                                     for img in imgs_out
                                 ],
+                                "HyperParameters/Gamma": [
+                                    wandb.Image(
+                                        gamma[[2, 1, 0], :, :]
+                                        .permute(1, 2, 0)
+                                        .cpu()
+                                        .detach()
+                                        .numpy()
+                                    )
+                                    for gamma in self.gamma[:4]
+                                ],
                             },
                             step=epoch,
                         )
@@ -248,6 +335,16 @@ class Cond_VAE(BaseVAE):
                                         .numpy()
                                     )
                                     for img in imgs_out
+                                ],
+                                "HyperParameters/Gamma": [
+                                    wandb.Image(
+                                        gamma[[2, 1, 0], :, :]
+                                        .permute(1, 2, 0)
+                                        .cpu()
+                                        .detach()
+                                        .numpy()
+                                    )
+                                    for gamma in self.gamma[:4]
                                 ],
                             },
                             step=epoch,
@@ -270,7 +367,7 @@ class Cond_VAE(BaseVAE):
             x = x.to(device)
             y = y.to(device)
             with torch.no_grad():
-                x_hat, _, _ = self.forward(x, y)
+                x_hat = self.sample(y, y.shape[0], gamma_added=False)
                 imgs_in = y[:4]
                 imgs_out = x_hat[:4]
 
@@ -289,16 +386,15 @@ class Cond_VAE(BaseVAE):
     def on_train_epoch_end(self, **kwargs):
         self.wandb_run.log(
             {
-                "HyperParameters/Gamma": self.gamma.item(),
                 "HyperParameters/Learning Rate": self.scheduler.get_last_lr()[0],
             },
             step=self.current_epoch,
         )
 
     def on_train_start(self, **kwargs):
-        self.gamma.requires_grad = True
+        """self.gamma.requires_grad = True
         self.optimizer.add_param_group({"params": [self.gamma]})
-
+        """
         val_loader = self.val_loader
         device = next(self.parameters()).device
 
@@ -352,11 +448,11 @@ class Cond_VAE(BaseVAE):
             x.to(next(self.parameters()).device),
             y.to(next(self.parameters()).device),
         )
-        x = x[0:1, :, :, :]  # Take the first sample from the batch
-        y = y[0:1, :, :, :]
+        x = x[2:3, :, :, :]  # Take the first sample from the batch
+        y = y[2:3, :, :, :]
         return y, x
 
-    def sample(self, y, samples=1000):
+    def sample(self, y, samples=100, gamma_added=True):
         """
         Generate samples from the VAE given a condition y.
         Args:
@@ -366,20 +462,34 @@ class Cond_VAE(BaseVAE):
             torch.Tensor: Generated samples of shape (num_samples, 4, patch_size, patch_size).
         """
         mu, logvar = self.cond_prior(y).chunk(2, dim=1)  # Split into mu and logvar
-        print(mu.shape, logvar.shape)
-        print(self.latent_size)
-        z = torch.randn(samples, self.latent_size, device=y.device)
+        _, _, h, w = y.shape
+        z = torch.randn(
+            samples, int(int(256 / (self.adjust * 2)) * 2 * h * w / 16), device=y.device
+        )
         z = mu + torch.exp(0.5 * logvar) * z
-        y = y.expand(samples, -1, -1, -1)  # Expand x to match samples
-        return self.decode(z, y).view(samples, 4, self.patch_size, self.patch_size)
+        self.gamma = self.variance_decoder(z)
+        if y.shape[0] == 1:
+            y = y.expand(samples, -1, -1, -1)  # Expand x to match samples
+        mean_decode = self.decode(z, y)
+        return (
+            mean_decode + torch.randn_like(mean_decode) * self.gamma
+            if gamma_added
+            else mean_decode
+        )
 
 
 if __name__ == "__main__":
     model = Cond_VAE(cr=1.5, patch_size=64)
     print(model)
+    print(model.adjust)
     y = torch.randn(1, 4, 32, 32)
     x = torch.randn(1, 4, 64, 64)  # Example input tensor
-    x_hat, mu, logvar = model.forward(x, y)
+    x_hat, mu, logvar, _ = model.forward(x, y)
+    cond_mu, cond_logvar = model.cond_prior(y).chunk(
+        2, dim=1
+    )  # Split into mu and logvar
     print("Output shape:", x_hat.shape)
     print("Mu shape:", mu.shape)
     print("Logvar shape:", logvar.shape)
+    print("Cond Mu shape:", cond_mu.shape)
+    print("Cond Logvar shape:", cond_logvar.shape)
