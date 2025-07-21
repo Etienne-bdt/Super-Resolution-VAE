@@ -25,7 +25,15 @@ class Cond_VAE(BaseVAE):
         callbacks (list, optional): List of callbacks to use during training (default: None).
     """
 
-    def __init__(self, cr, patch_size=64, callbacks=None, slurm_job_id="local", L=1):
+    def __init__(
+        self,
+        cr,
+        patch_size=64,
+        callbacks=None,
+        slurm_job_id="local",
+        L=1,
+        gamma_type="scalar",
+    ):
         if callbacks is None:
             callbacks = []
         super(Cond_VAE, self).__init__(patch_size, callbacks, slurm_job_id)
@@ -33,6 +41,7 @@ class Cond_VAE(BaseVAE):
         self.L: int = L  # Number of samples to draw from the latent space
         self.adjust = int(4 // self.cr)  # Ensure latent size is a multiple of 4
         self.patch_size = patch_size
+        self.gamma_type = gamma_type
 
         self.cond_prior = nn.Sequential(
             down_block(in_channels=4, out_channels=64),  # out 16 , 16 , 16
@@ -99,35 +108,38 @@ class Cond_VAE(BaseVAE):
             nn.Sigmoid(),  # Ensure output is in [0, 1]
         )
 
-        self.variance_decoder = nn.Sequential(
-            nn.Unflatten(
-                1,
-                (
-                    int(256 / (2 * self.adjust)) * 2,
-                    patch_size // 2**3,
-                    patch_size // 2**3,
+        if gamma_type == "scalar":
+            self.gamma = nn.Parameter(torch.tensor(1.0, dtype=torch.float32))
+        else:
+            self.variance_decoder = nn.Sequential(
+                nn.Unflatten(
+                    1,
+                    (
+                        int(256 / (2 * self.adjust)) * 2,
+                        patch_size // 2**3,
+                        patch_size // 2**3,
+                    ),
                 ),
-            ),
-            up_block(
-                in_channels=int(256 / (2 * self.adjust)) * 2,
-                out_channels=256,
-            ),
-            up_block(
-                in_channels=256,
-                out_channels=128,
-            ),
-            up_block(
-                in_channels=128,
-                out_channels=64,
-            ),
-            conv_block(64, 32, 3, 1, 1),
-            conv_block(32, 16, 1, 1, 0),
-            conv_block(16, 8, 1, 1, 0),
-            conv_block(
-                8, 4, 1, 1, 0, final_relu=False
-            ),  # Final conv to match input channels
-            nn.Sigmoid(),  # Ensure output is in [0, 1]
-        )
+                up_block(
+                    in_channels=int(256 / (2 * self.adjust)) * 2,
+                    out_channels=256,
+                ),
+                up_block(
+                    in_channels=256,
+                    out_channels=128,
+                ),
+                up_block(
+                    in_channels=128,
+                    out_channels=64,
+                ),
+                conv_block(64, 32, 3, 1, 1),
+                conv_block(32, 16, 1, 1, 0),
+                conv_block(16, 8, 1, 1, 0),
+                conv_block(
+                    8, 4, 1, 1, 0, final_relu=False
+                ),  # Final conv to match input channels
+                nn.Sigmoid(),  # Ensure output is in [0, 1]
+            )
 
         # 4 output channels (same as input)
         self.num_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
@@ -164,6 +176,12 @@ class Cond_VAE(BaseVAE):
         cat = torch.cat((z_decoded, y), dim=1)  # Concatenate with original input
         return self.decoder_end(cat)
 
+    def decoder_variance(self, z):
+        if self.gamma_type == "scalar":
+            return self.gamma
+        else:
+            return self.variance_decoder(z)
+
     def forward(self, x, y, L=1):
         # Forward pass through the VAE
         mu, logvar = self.encode(x, y)
@@ -176,10 +194,10 @@ class Cond_VAE(BaseVAE):
                     torch.stack(decoded, dim=0),
                     mu,
                     logvar,
-                    self.variance_decoder(z.mean(dim=0)),
+                    self.decoder_variance(z.mean(dim=0)),
                 )
 
-        return self.decode(z, y), mu, logvar, self.variance_decoder(z)
+        return self.decode(z, y), mu, logvar, self.decoder_variance(z)
 
     def train_step(self, batch, device):
         y, x = batch
@@ -317,7 +335,9 @@ class Cond_VAE(BaseVAE):
                                         .numpy()
                                     )
                                     for gamma in self.gamma[:4]
-                                ],
+                                ]
+                                if self.gamma_type != "scalar"
+                                else [],
                             },
                             step=epoch,
                         )
@@ -345,7 +365,9 @@ class Cond_VAE(BaseVAE):
                                         .numpy()
                                     )
                                     for gamma in self.gamma[:4]
-                                ],
+                                ]
+                                if self.gamma_type != "scalar"
+                                else [],
                             },
                             step=epoch,
                         )
@@ -390,11 +412,19 @@ class Cond_VAE(BaseVAE):
             },
             step=self.current_epoch,
         )
+        if self.gamma_type == "scalar":
+            self.wandb_run.log(
+                {
+                    "HyperParameters/Gamma": self.gamma.item(),
+                },
+                step=self.current_epoch,
+            )
 
     def on_train_start(self, **kwargs):
-        """self.gamma.requires_grad = True
-        self.optimizer.add_param_group({"params": [self.gamma]})
-        """
+        if self.gamma_type == "scalar":
+            self.gamma.requires_grad = True
+            self.optimizer.add_param_group({"params": [self.gamma]})
+
         val_loader = self.val_loader
         device = next(self.parameters()).device
 
@@ -467,7 +497,7 @@ class Cond_VAE(BaseVAE):
             samples, int(int(256 / (self.adjust * 2)) * 2 * h * w / 16), device=y.device
         )
         z = mu + torch.exp(0.5 * logvar) * z
-        self.gamma = self.variance_decoder(z)
+        self.gamma = self.decoder_variance(z)
         if y.shape[0] == 1:
             y = y.expand(samples, -1, -1, -1)  # Expand x to match samples
         mean_decode = self.decode(z, y)

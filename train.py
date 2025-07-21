@@ -56,6 +56,7 @@ def main(args):
             callbacks=callbacks_list,
             slurm_job_id=slurm_job_id,
             L=L,
+            gamma_type=args.gamma_type,
         )
 
     else:
@@ -159,6 +160,14 @@ def parse_args():
         default="MVAE",
         choices=["MVAE", "VAE", "Cond_VAE"],
         help="Model to use : 'MVAE' ou 'VAE' ou 'Cond_VAE'.",
+    )
+
+    parser.add_argument(
+        "--gamma_type",
+        type=str,
+        default="scalar",
+        choices=["scalar", "vector"],
+        help="Type of gamma to use in the model.",
     )
 
     return parser.parse_args()
