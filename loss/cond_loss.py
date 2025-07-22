@@ -14,7 +14,7 @@ def cond_loss(recon_x, x, mu, logvar, cond_mu, cond_logvar, gamma):
         gamma.device
     )  # (L, batch, chan, h, w)
 
-    if gamma.ndim == 1:
+    if isinstance(gamma, torch.nn.Parameter):
         gamma_reshaped = gamma
     else:
         # Reshape gamma to match the spatial dimensions of x

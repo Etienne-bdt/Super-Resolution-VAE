@@ -77,6 +77,9 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
                     "Parameter_number": self.num_params,
                     "cr": self.cr,
                     "L": kwargs.get("L", None),
+                    "gamma_type": self.gamma_type
+                    if hasattr(self, "gamma_type")
+                    else "scalar",
                 },
             ),
         )

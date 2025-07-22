@@ -47,7 +47,7 @@ def multimodal_loss(
     mse_x_per_pixel = F.mse_loss(recon_x, x, reduction="none").to(gammax.device)
 
     # Handle gamma reshaping for both scalar and vector cases
-    if gammax.ndim == 1:
+    if gammax.ndim == 0:
         # Scalar gamma - use original logic
         if recon_x.ndim == 5:
             n_y = y_shape[2] * y_shape[3] * y_shape[4]

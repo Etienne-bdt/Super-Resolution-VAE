@@ -36,8 +36,6 @@ class Multimodal_VAE(BaseVAE):
             self.gammax = torch.tensor(1.0, requires_grad=True)
             self.gammay = torch.tensor(1.0, requires_grad=True)
         else:
-            self.gammax = torch.tensor(1.0, requires_grad=True)
-            self.gammay = torch.tensor(1.0, requires_grad=True)
             # Add variance decoder for x (HR output)
             self.variance_decoder_x = nn.Sequential(
                 nn.Unflatten(
@@ -743,7 +741,7 @@ class Multimodal_VAE(BaseVAE):
                 "Validation loader must be provided for baseline evaluation."
             )
         if os.path.exists("baseline_ckpt.pth"):
-            baseline = torch.load("baseline_ckpt.pth")
+            baseline = torch.load("baseline_ckpt.pth", weights_only=False)
             self.ssim_base = baseline["ssim_base"]
             self.lpips_base = baseline["lpips_base"]
             print(
