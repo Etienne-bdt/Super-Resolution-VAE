@@ -32,7 +32,7 @@ def main(args):
         callbacks.EarlyStopping(patience=25, delta=0.01),
     ]
 
-    L = 1
+    L = args.L
 
     if args.model_type == "VAE":
         model = models.VAE(
@@ -169,6 +169,14 @@ def parse_args():
         default="scalar",
         choices=["scalar", "vector"],
         help="Type of gamma to use in the model.",
+    )
+
+    parser.add_argument(
+        "-L",
+        "--L",
+        type=int,
+        default=1,
+        help="Number of latent sampling in the model.",
     )
 
     return parser.parse_args()

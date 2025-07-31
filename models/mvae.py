@@ -27,8 +27,8 @@ class Multimodal_VAE(BaseVAE):
             callbacks = []
         super(Multimodal_VAE, self).__init__(patch_size, callbacks, slurm_job_id)
         self.cr = cr
-        self.adjustx = 4 // self.cr
-        self.adjusty = 8 // self.cr
+        self.adjustx = 4 * self.cr
+        self.adjusty = 8 * self.cr
         self.patch_size = patch_size
         self.L = L
         self.gamma_type = gamma_type
