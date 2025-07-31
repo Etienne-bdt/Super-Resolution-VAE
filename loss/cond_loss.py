@@ -9,17 +9,22 @@ def cond_loss(recon_x, x, mu, logvar, cond_mu, cond_logvar, gamma):
     if recon_x.ndim == 5:
         x = x.expand(x_shape[0], -1, -1, -1, -1)
 
-    # Reshape gamma to match the spatial dimensions of x
-    gamma_reshaped = (
-        gamma.view(x_shape[1], x_shape[2], x_shape[3], x_shape[4]).to(gamma.device)
-        if recon_x.ndim == 5
-        else gamma.view(x_shape[0], x_shape[1], x_shape[2], x_shape[3]).to(gamma.device)
-    )  # (1, chan, h, w)
-
     # Compute MSE per pixel
     mse_per_pixel = F.mse_loss(recon_x, x, reduction="none").to(
         gamma.device
     )  # (L, batch, chan, h, w)
+
+    if isinstance(gamma, torch.nn.Parameter):
+        gamma_reshaped = gamma
+    else:
+        # Reshape gamma to match the spatial dimensions of x
+        gamma_reshaped = (
+            gamma.view(x_shape[1], x_shape[2], x_shape[3], x_shape[4]).to(gamma.device)
+            if recon_x.ndim == 5
+            else gamma.view(x_shape[0], x_shape[1], x_shape[2], x_shape[3]).to(
+                gamma.device
+            )
+        )  # (1, chan, h, w)
 
     # Apply diagonal gamma weighting
     if recon_x.ndim == 5:

@@ -14,23 +14,98 @@ from .layers import conv_block, down_block, up_block
 
 
 class Multimodal_VAE(BaseVAE):
-    def __init__(self, cr, patch_size=64, callbacks=None, slurm_job_id="local", L=100):
+    def __init__(
+        self,
+        cr,
+        patch_size=64,
+        callbacks=None,
+        slurm_job_id="local",
+        L=100,
+        gamma_type="scalar",
+    ):
         if callbacks is None:
             callbacks = []
         super(Multimodal_VAE, self).__init__(patch_size, callbacks, slurm_job_id)
         self.cr = cr
-        self.latent_size = int((patch_size * patch_size * 4 / self.cr) // 256) * 256
-        self.latent_size_y = self.latent_size // 4
+        self.adjustx = 4 * self.cr
+        self.adjusty = 8 * self.cr
         self.patch_size = patch_size
         self.L = L
-        self.gammax = torch.tensor(1.0, requires_grad=True)
-        self.gammay = torch.tensor(1.0, requires_grad=True)
+        self.gamma_type = gamma_type
+        if gamma_type == "scalar":
+            self.gammax = torch.tensor(1.0, requires_grad=True)
+            self.gammay = torch.tensor(1.0, requires_grad=True)
+        else:
+            # Add variance decoder for x (HR output)
+            self.variance_decoder_x = nn.Sequential(
+                nn.Unflatten(
+                    1,
+                    (
+                        int(256 / (2 * self.adjustx)) * 2,
+                        patch_size // 2**3,
+                        patch_size // 2**3,
+                    ),
+                ),
+                up_block(
+                    in_channels=int(256 / (2 * self.adjustx)) * 2,
+                    out_channels=256,
+                ),
+                up_block(
+                    in_channels=256,
+                    out_channels=128,
+                ),
+                up_block(
+                    in_channels=128,
+                    out_channels=64,
+                ),
+                conv_block(64, 32, 3, 1, 1),
+                conv_block(32, 16, 1, 1, 0),
+                conv_block(16, 8, 1, 1, 0),
+                conv_block(
+                    8, 4, 1, 1, 0, final_relu=False
+                ),  # Final conv to match input channels
+                nn.Sigmoid(),  # Ensure output is in [0, 1]
+            )
+            # Add variance decoder for y (LR output)
+            self.variance_decoder_y = nn.Sequential(
+                nn.Unflatten(
+                    1,
+                    (
+                        int(256 / (2 * self.adjusty)) * 2,
+                        patch_size // 2**3,
+                        patch_size // 2**3,
+                    ),
+                ),
+                up_block(
+                    in_channels=int(256 / (2 * self.adjusty)) * 2,
+                    out_channels=256,
+                ),
+                up_block(
+                    in_channels=256,
+                    out_channels=128,
+                ),
+                conv_block(128, 64, 3, 1, 1),
+                conv_block(64, 32, 1, 1, 0),
+                conv_block(32, 16, 1, 1, 0),
+                conv_block(
+                    16, 4, 1, 1, 0, final_relu=False
+                ),  # Final conv to match input channels
+                nn.Sigmoid(),  # Ensure output is in [0, 1]
+            )
 
         self.encoder_y = nn.Sequential(
-            down_block(in_channels=4, out_channels=16),  # out 16 , 16 , 16
-            down_block(in_channels=16, out_channels=64),  # out 64, 8, 8
+            down_block(in_channels=4, out_channels=16),  # out 16,
+            down_block(in_channels=16, out_channels=64),  # out 64, 16, 16
             conv_block(64, 128, 3, 1, 1),
-            conv_block(128, self.latent_size_y // 32, 3, 1, 1, final_relu=False),
+            conv_block(128, 256, 3, 1, 1),
+            conv_block(
+                256,
+                int(256 / (2 * self.adjusty)) * 4,
+                1,
+                1,
+                0,
+                final_relu=False,
+            ),
             nn.Flatten(start_dim=1),  # Flatten to (batch_size, latent_size // 8)
             # out 512 * 2 * 2 = 2048
         )
@@ -39,60 +114,85 @@ class Multimodal_VAE(BaseVAE):
             nn.Unflatten(
                 1,
                 (
-                    self.latent_size_y // 64,
-                    self.patch_size // 2**3,
-                    self.patch_size // 2**3,
+                    int(256 / (2 * self.adjusty)) * 2,
+                    patch_size // 2**3,
+                    patch_size // 2**3,
                 ),
             ),
             up_block(
-                in_channels=self.latent_size_y // 64,
-                out_channels=128,
+                in_channels=int(256 / (2 * self.adjusty)) * 2,
+                out_channels=256,
             ),
             up_block(
-                in_channels=128,
-                out_channels=64,
+                in_channels=256,
+                out_channels=128,
             ),
-            conv_block(64, 64, 3, 1, 1),
-            conv_block(64, 16, 3, 1, 1),
-            conv_block(16, 4, 3, 1, 1, final_relu=False),
+            conv_block(128, 64, 3, 1, 1),
+            conv_block(64, 32, 1, 1, 0),
+            conv_block(32, 16, 1, 1, 0),
+            conv_block(
+                16, 4, 1, 1, 0, final_relu=False
+            ),  # Final conv to match input channels
             nn.Sigmoid(),  # Ensure output is in [0, 1]
         )
 
+        self.hr_down = down_block(in_channels=4, out_channels=16)  # out 16 , 16 , 16
+
         self.encoder_x = nn.Sequential(
-            down_block(in_channels=4, out_channels=16),  # out 16, 32, 32
-            down_block(in_channels=16, out_channels=64),
-            down_block(
-                in_channels=64,
+            down_block(in_channels=20, out_channels=64),  # out 64, 8, 8
+            down_block(64, 128),
+            conv_block(128, 256, 3, 1, 1),
+            conv_block(
+                256,
+                int(256 / (2 * self.adjustx)) * 2,
+                1,
+                1,
+                0,
+                final_relu=False,
+            ),
+            # Flatten to (batch_size, latent_size // 8)
+            # out 512 * 2 * 2 = 2048
+        )
+
+        self.decoder_x = nn.Sequential(
+            nn.Unflatten(
+                1,
+                (
+                    int(256 / (2 * self.adjustx)) * 4,
+                    patch_size // 2**3,
+                    patch_size // 2**3,
+                ),
+            ),
+            up_block(
+                in_channels=int(256 / (2 * self.adjustx)) * 4,
+                out_channels=256,
+            ),
+            up_block(
+                in_channels=256,
                 out_channels=128,
             ),
-            conv_block(128, 128, 3, 1, 1),
-            conv_block(128, 128, 3, 1, 1),
-            conv_block(128, self.latent_size // 64, 3, 1),
-            # out 1024 * 4 * 4 = 16384
-        )  # out 1024, 4, 4
+            conv_block(128, 64, 3, 1, 1),
+            conv_block(64, 32, 1, 1, 0),
+            conv_block(32, 16, 1, 1, 0),
+        )
+        self.decoder_end = nn.Sequential(
+            up_block(in_channels=20, out_channels=16),  # upsample to 8x8
+            conv_block(16, 8, 3, 1, 1),
+            conv_block(8, 8, 1, 1, 0),
+            conv_block(
+                8, 4, 1, 1, 0, final_relu=False
+            ),  # Final conv to match input channels
+            nn.Sigmoid(),  # Ensure output is in [0, 1]
+        )
 
         self.z_carac = nn.Sequential(
             down_block(
-                in_channels=self.latent_size * 3 // 64,
-                out_channels=self.latent_size // 32,
+                in_channels=int(256 / (2 * self.adjustx)) * 4,
+                out_channels=int(256 / (2 * self.adjustx)) * 16,
             ),
             conv_block(
-                in_channels=self.latent_size // 32,
-                out_channels=self.latent_size // 16,
-                kernel_size=3,
-                stride=1,
-                padding=1,
-            ),
-            conv_block(
-                in_channels=self.latent_size // 16,
-                out_channels=self.latent_size // 16,
-                kernel_size=3,
-                stride=1,
-                padding=1,
-            ),
-            conv_block(
-                in_channels=self.latent_size // 16,
-                out_channels=self.latent_size * 2 // 16,
+                in_channels=int(256 / (2 * self.adjustx)) * 16,
+                out_channels=int(256 / (2 * self.adjustx)) * 16,
                 kernel_size=3,
                 stride=1,
                 padding=1,
@@ -101,45 +201,11 @@ class Multimodal_VAE(BaseVAE):
             nn.Flatten(1),
         )
 
-        self.decoder_x = nn.Sequential(
-            nn.Unflatten(
-                1,
-                (
-                    self.latent_size * 3 // 64,
-                    self.patch_size // 2**3,
-                    self.patch_size // 2**3,
-                ),
-            ),
-            up_block(
-                in_channels=self.latent_size * 3 // 64,
-                out_channels=256,
-            ),
-            up_block(
-                in_channels=256,
-                out_channels=128,
-            ),
-            up_block(
-                in_channels=128,
-                out_channels=64,
-            ),
-            conv_block(64, 64, 3, 1, 1),
-            conv_block(64, 16, 3, 1, 1),
-            conv_block(
-                in_channels=16,
-                out_channels=4,
-                kernel_size=3,
-                stride=1,
-                padding=1,
-                final_relu=False,
-            ),
-            nn.Sigmoid(),  # Ensure output is in [0, 1]
-        )
-
         self.y_to_z = nn.Sequential(
             down_block(in_channels=4, out_channels=16),
             down_block(in_channels=16, out_channels=64),
             conv_block(64, 128, 3, 1, 1),
-            conv_block(128, self.latent_size // 64, 3, 1, 1),
+            conv_block(128, int(256 / (2 * self.adjustx)) * 2, 3, 1, 1),
             # Flatten to (batch_size, latent_size // 3)
             # out 8192
         )
@@ -148,46 +214,47 @@ class Multimodal_VAE(BaseVAE):
             nn.Unflatten(
                 1,
                 (
-                    self.latent_size_y // 64,
+                    int(256 / (2 * self.adjusty)) * 2,
                     self.patch_size // 2**3,
                     self.patch_size // 2**3,
                 ),
             ),
             conv_block(
-                in_channels=self.latent_size_y // 64,
-                out_channels=self.latent_size_y // 32,
+                in_channels=int(256 / (2 * self.adjusty)) * 2,
+                out_channels=int(256 / (2 * self.adjusty)) * 4,
                 kernel_size=3,
                 stride=1,
                 padding=1,
             ),
             conv_block(
-                in_channels=self.latent_size_y // 32,
-                out_channels=self.latent_size_y // 16,
+                in_channels=int(256 / (2 * self.adjusty)) * 4,
+                out_channels=int(256 / (2 * self.adjustx)) * 2,
                 kernel_size=3,
                 stride=1,
                 padding=1,
-            ),
+                final_relu=False,
+            ),  # Flatten to (batch_size, latent_size // 3)
         )
 
         self.uy_z = nn.Sequential(
             nn.Unflatten(
                 1,
                 (
-                    self.latent_size * 2 // 64,
+                    int(256 / (2 * self.adjustx)) * 4,
                     self.patch_size // 2**3,
                     self.patch_size // 2**3,
                 ),
             ),
             conv_block(
-                in_channels=self.latent_size * 2 // 64,
-                out_channels=self.latent_size // 64,
+                in_channels=int(256 / (2 * self.adjustx)) * 4,
+                out_channels=int(256 / (2 * self.adjusty)) * 4,
                 kernel_size=3,
                 stride=1,
                 padding=1,
             ),
             conv_block(
-                in_channels=self.latent_size // 64,
-                out_channels=self.latent_size * 2 // 64,
+                in_channels=int(256 / (2 * self.adjusty)) * 4,
+                out_channels=int(256 / (2 * self.adjustx)) * 4,
                 kernel_size=3,
                 stride=1,
                 padding=1,
@@ -230,8 +297,22 @@ class Multimodal_VAE(BaseVAE):
         return self.decoder_y(u)
 
     def decode_x(self, z, y, u):
-        stack = torch.cat((u, y, z), dim=1)
-        return self.decoder_x(stack)
+        stack = torch.cat((u, z), dim=1)
+        x_decode = self.decoder_x(stack)
+        end_stack = torch.cat((x_decode, y), dim=1)
+        return self.decoder_end(end_stack)
+
+    def decoder_variance_x(self, z):
+        if self.gamma_type == "scalar":
+            return self.gammax
+        else:
+            return self.variance_decoder_x(z)
+
+    def decoder_variance_y(self, u):
+        if self.gamma_type == "scalar":
+            return self.gammay
+        else:
+            return self.variance_decoder_y(u)
 
     def forward(self, x, y, L=None):
         if L is None:
@@ -240,22 +321,25 @@ class Multimodal_VAE(BaseVAE):
         x_hat_list = []
         y_hat_list = []
 
-        x_enc = self.encode_x(x)
+        x_pre = self.hr_down(x)
+        # Encode x and y
+        x_y_stack = torch.cat((x_pre, y), dim=1)
+
+        x_enc = self.encode_x(x_y_stack)
         y_enc = self.y_to_z(y)
         # Reparameterization trick for u
         # This loop is added to allow multiple reparameterizations of u
         # This is useful for sampling from the latent space
         u = self.reparameterize(mu_u, logvar_u)
         u_enc = self.u_to_z(u)
-        mu_z, logvar_z = torch.chunk(
-            self.z_carac(torch.cat((x_enc, y_enc, u_enc), dim=1)), 2, dim=1
-        )
+        stack = torch.cat((x_enc, u_enc), dim=1)
+        mu_z, logvar_z = torch.chunk(self.z_carac(stack), 2, dim=1)
         y_enc = y_enc.view(y_enc.size(0), -1)
         u_enc = u_enc.view(u_enc.size(0), -1)
         mu_z_uy, logvar_z_uy = self.z_cond(y_enc, u_enc)
         for _ in range(L):
             z = self.reparameterize(mu_z, logvar_z)
-            x_hat = self.decode_x(z, y_enc, u_enc)
+            x_hat = self.decode_x(z, y, u_enc)
             y_hat = self.decode_y(u)
             x_hat_list.append(x_hat.unsqueeze(0))
             y_hat_list.append(y_hat.unsqueeze(0))
@@ -267,10 +351,17 @@ class Multimodal_VAE(BaseVAE):
             x_hat_5d = x_hat
             y_hat_5d = y_hat
 
+        # Get variances
+        gammax = self.decoder_variance_x(z)
+        gammay = self.decoder_variance_y(u)
+        self.gammax = gammax
+        self.gammay = gammay
+
         return x_hat_5d, y_hat_5d, mu_z, logvar_z, mu_u, logvar_u, mu_z_uy, logvar_z_uy
 
     def conditional_generation(self, y):
         # Generate a sample from the model
+        y_original = y
         mu_u, logvar_u = self.encode_y(y)
         u = self.reparameterize(mu_u, logvar_u)
 
@@ -280,7 +371,7 @@ class Multimodal_VAE(BaseVAE):
         mu_z_uy, logvar_z_uy = self.z_cond(y, u)
         z = self.reparameterize(mu_z_uy, logvar_z_uy)
 
-        x_hat = self.decode_x(z, y, u)
+        x_hat = self.decode_x(z, y_original, u)
         return x_hat
 
     def sample(self, y, samples=10000) -> torch.Tensor:
@@ -345,7 +436,7 @@ class Multimodal_VAE(BaseVAE):
             u_flat = u_expanded.reshape(current_batch_size * samples_z, -1)
 
             # Decode on GPU
-            batch_output = self.decode_x(z, y_flat, u_flat)
+            batch_output = self.decode_x(z, y, u_flat)
 
             # Move to CPU only if samples > 5000
             all_outputs.append(batch_output.to(cpu_device))
@@ -368,12 +459,6 @@ class Multimodal_VAE(BaseVAE):
         # Concatenate all results and move back to original device
         final_output = torch.cat(all_outputs, dim=0).to(device)
         return final_output
-
-    def generation(self):
-        u = torch.randn(1, self.latent_size_y).to("cuda")
-        y = self.decode_y(u)
-
-        return y, self.conditional_generation(y)
 
     def train_step(self, batch, device):
         y, x = batch
@@ -507,35 +592,61 @@ class Multimodal_VAE(BaseVAE):
                         "x_hat": x_hat[:4, [2, 1, 0], :, :].clamp(0, 1),
                         "x_sr": x_sr[:4, [2, 1, 0], :, :].clamp(0, 1),
                     }
-                    wandb_run.log(
-                        {
-                            "Images/LR_Input": [
-                                wandb.Image(img.permute(1, 2, 0).cpu().numpy())
-                                for img in imgs["y"]
-                            ],
-                            "Images/HR_Input": [
-                                wandb.Image(img.permute(1, 2, 0).cpu().numpy())
-                                for img in imgs["x"]
-                            ],
-                            "Images/LR_Bicubic": [
-                                wandb.Image(img.permute(1, 2, 0).cpu().numpy())
-                                for img in imgs["y_bicubic"]
-                            ],
-                            "Images/LR_Recon": [
-                                wandb.Image(img.permute(1, 2, 0).cpu().numpy())
-                                for img in imgs["y_hat"]
-                            ],
-                            "Images/HR_Recon": [
-                                wandb.Image(img.permute(1, 2, 0).cpu().numpy())
-                                for img in imgs["x_hat"]
-                            ],
-                            "Images/SR_Output": [
-                                wandb.Image(img.permute(1, 2, 0).cpu().numpy())
-                                for img in imgs["x_sr"]
-                            ],
-                        },
-                        step=epoch,
-                    )
+                    log_dict = {
+                        "Images/LR_Input": [
+                            wandb.Image(img.permute(1, 2, 0).cpu().numpy())
+                            for img in imgs["y"]
+                        ],
+                        "Images/HR_Input": [
+                            wandb.Image(img.permute(1, 2, 0).cpu().numpy())
+                            for img in imgs["x"]
+                        ],
+                        "Images/LR_Bicubic": [
+                            wandb.Image(img.permute(1, 2, 0).cpu().numpy())
+                            for img in imgs["y_bicubic"]
+                        ],
+                        "Images/LR_Recon": [
+                            wandb.Image(img.permute(1, 2, 0).cpu().numpy())
+                            for img in imgs["y_hat"]
+                        ],
+                        "Images/HR_Recon": [
+                            wandb.Image(img.permute(1, 2, 0).cpu().numpy())
+                            for img in imgs["x_hat"]
+                        ],
+                        "Images/SR_Output": [
+                            wandb.Image(img.permute(1, 2, 0).cpu().numpy())
+                            for img in imgs["x_sr"]
+                        ],
+                    }
+
+                    # Add gamma images if not scalar (matching cond_vae pattern)
+                    if self.gamma_type != "scalar":
+                        log_dict.update(
+                            {
+                                "HyperParameters/Gamma_X": [
+                                    wandb.Image(
+                                        gamma[[2, 1, 0], :, :]
+                                        .permute(1, 2, 0)
+                                        .cpu()
+                                        .detach()
+                                        .numpy()
+                                    )
+                                    for gamma in self.gammax[:4]
+                                ],
+                                "HyperParameters/Gamma_Y": [
+                                    wandb.Image(
+                                        gamma[[2, 1, 0], :, :]
+                                        .permute(1, 2, 0)
+                                        .cpu()
+                                        .detach()
+                                        .numpy()
+                                    )
+                                    for gamma in self.gammay[:4]
+                                ],
+                            }
+                        )
+
+                    wandb_run.log(log_dict, step=epoch)
                     first = False
 
             # average metrics
@@ -568,42 +679,69 @@ class Multimodal_VAE(BaseVAE):
                 "x_sr": x_sr[:4, [2, 1, 0], :, :].clamp(0, 1),
             }
 
-        if epoch % 10 == 0:
+        if epoch % 5 == 0:  # Changed from 10 to 5 to match cond_vae
             # log sample images
-            wandb_run.log(
-                {
-                    "Images/LR_Recon": [
-                        wandb.Image(img.permute(1, 2, 0).cpu().numpy())
-                        for img in imgs["y_hat"]
-                    ],
-                    "Images/HR_Recon": [
-                        wandb.Image(img.permute(1, 2, 0).cpu().numpy())
-                        for img in imgs["x_hat"]
-                    ],
-                    "Images/SR_Output": [
-                        wandb.Image(img.permute(1, 2, 0).cpu().numpy())
-                        for img in imgs["x_sr"]
-                    ],
-                },
-                step=epoch,
-            )
+            log_dict = {
+                "Images/LR_Recon": [
+                    wandb.Image(img.permute(1, 2, 0).cpu().numpy())
+                    for img in imgs["y_hat"]
+                ],
+                "Images/HR_Recon": [
+                    wandb.Image(img.permute(1, 2, 0).cpu().numpy())
+                    for img in imgs["x_hat"]
+                ],
+                "Images/SR_Output": [
+                    wandb.Image(img.permute(1, 2, 0).cpu().numpy())
+                    for img in imgs["x_sr"]
+                ],
+            }
+
+            # Add gamma images if not scalar (matching cond_vae pattern)
+            if self.gamma_type != "scalar":
+                log_dict.update(
+                    {
+                        "HyperParameters/Gamma_X": [
+                            wandb.Image(
+                                gamma[[2, 1, 0], :, :]
+                                .permute(1, 2, 0)
+                                .cpu()
+                                .detach()
+                                .numpy()
+                            )
+                            for gamma in self.gammax[:4]
+                        ],
+                        "HyperParameters/Gamma_Y": [
+                            wandb.Image(
+                                gamma[[2, 1, 0], :, :]
+                                .permute(1, 2, 0)
+                                .cpu()
+                                .detach()
+                                .numpy()
+                            )
+                            for gamma in self.gammay[:4]
+                        ],
+                    }
+                )
+
+            wandb_run.log(log_dict, step=epoch)
 
     def on_train_start(self, **kwargs):
-        self.gammax.requires_grad = True
-        self.gammay.requires_grad = True
+        if self.gamma_type == "scalar":
+            self.gammax.requires_grad = True
+            self.gammay.requires_grad = True
+            self.optimizer.add_param_group(
+                {
+                    "params": [self.gammax, self.gammay],
+                }
+            )
         device = next(self.parameters()).device
-        self.optimizer.add_param_group(
-            {
-                "params": [self.gammax, self.gammay],
-            }
-        )
         val_loader = self.val_loader
         if val_loader is None:
             raise ValueError(
                 "Validation loader must be provided for baseline evaluation."
             )
         if os.path.exists("baseline_ckpt.pth"):
-            baseline = torch.load("baseline_ckpt.pth")
+            baseline = torch.load("baseline_ckpt.pth", weights_only=False)
             self.ssim_base = baseline["ssim_base"]
             self.lpips_base = baseline["lpips_base"]
             print(
@@ -646,14 +784,19 @@ class Multimodal_VAE(BaseVAE):
             )
 
     def on_train_epoch_end(self, **kwargs):
-        self.wandb_run.log(
-            {
-                "HyperParameters/Gamma_X": self.gammax.item(),
-                "HyperParameters/Gamma_Y": self.gammay.item(),
-                "HyperParameters/Learning Rate": self.scheduler.get_last_lr()[0],
-            },
-            step=self.current_epoch,
-        )
+        log_dict = {
+            "HyperParameters/Learning Rate": self.scheduler.get_last_lr()[0],
+        }
+
+        if self.gamma_type == "scalar":
+            log_dict.update(
+                {
+                    "HyperParameters/Gamma_X": self.gammax.item(),
+                    "HyperParameters/Gamma_Y": self.gammay.item(),
+                }
+            )
+
+        self.wandb_run.log(log_dict, step=self.current_epoch)
 
     def get_task_data(self, val_loader):
         batch = next(iter(val_loader))
@@ -669,7 +812,7 @@ class Multimodal_VAE(BaseVAE):
 
 if __name__ == "__main__":
     # Example usage
-    model = Multimodal_VAE(cr=2, patch_size=64)
+    model = Multimodal_VAE(cr=1.5, patch_size=64, gamma_type="vector")
     print(model)
     x = torch.randn(1, 4, 64, 64)
     y = torch.randn(1, 4, 32, 32)  # Example condition
@@ -683,6 +826,12 @@ if __name__ == "__main__":
     print("logvar_u shape:", logvar_u.shape)
     print("mu_z_uy shape:", mu_z_uy.shape)
     print("logvar_z_uy shape:", logvar_z_uy.shape)
+
+    if model.gamma_type != "scalar":
+        gammax = model.gammax
+        gammay = model.gammay
+        print("Gamma X shape:", gammax.shape)
+        print("Gamma Y shape:", gammay.shape)
 
     # You can add more code here to test the model, e.g., training loop, etc.
     # Note: This is just a placeholder for demonstration purposes.

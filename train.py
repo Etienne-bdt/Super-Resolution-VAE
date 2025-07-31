@@ -32,7 +32,7 @@ def main(args):
         callbacks.EarlyStopping(patience=25, delta=0.01),
     ]
 
-    L = 1
+    L = args.L
 
     if args.model_type == "VAE":
         model = models.VAE(
@@ -48,6 +48,7 @@ def main(args):
             callbacks=callbacks_list,
             slurm_job_id=slurm_job_id,
             L=L,
+            gamma_type=args.gamma_type,
         )
     elif args.model_type == "Cond_VAE":
         model = models.Cond_VAE(
@@ -56,6 +57,7 @@ def main(args):
             callbacks=callbacks_list,
             slurm_job_id=slurm_job_id,
             L=L,
+            gamma_type=args.gamma_type,
         )
 
     else:
@@ -159,6 +161,22 @@ def parse_args():
         default="MVAE",
         choices=["MVAE", "VAE", "Cond_VAE"],
         help="Model to use : 'MVAE' ou 'VAE' ou 'Cond_VAE'.",
+    )
+
+    parser.add_argument(
+        "--gamma_type",
+        type=str,
+        default="scalar",
+        choices=["scalar", "vector"],
+        help="Type of gamma to use in the model.",
+    )
+
+    parser.add_argument(
+        "-L",
+        "--L",
+        type=int,
+        default=1,
+        help="Number of latent sampling in the model.",
     )
 
     return parser.parse_args()
