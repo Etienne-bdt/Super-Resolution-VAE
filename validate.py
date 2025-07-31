@@ -163,9 +163,9 @@ def load_model(args) -> torch.nn.Module:
 
 def compute_ssim(pred: torch.Tensor, target: torch.Tensor) -> float:
     """Compute SSIM between prediction and target."""
-    # Convert to numpy and move to RGB format for SSIM computation
-    pred_np = pred[[2, 1, 0], :, :].cpu().numpy().transpose(1, 2, 0)
-    target_np = target[[2, 1, 0], :, :].cpu().numpy().transpose(1, 2, 0)
+    # Convert to numpy and include all channels (Blue, Green, Red, NIR)
+    pred_np = pred.cpu().numpy().transpose(1, 2, 0)
+    target_np = target.cpu().numpy().transpose(1, 2, 0)
     
     # Ensure values are in [0, 1] range
     pred_np = np.clip(pred_np, 0, 1)

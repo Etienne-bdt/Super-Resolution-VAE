@@ -40,16 +40,7 @@ L=${L:-1}
 NUM_SAMPLES=${NUM_SAMPLES:-100}
 BATCH_SIZE=${BATCH_SIZE:-1}
 
-echo "Starting validation with the following parameters:"
-echo "Model Checkpoint: $MODEL_CKPT"
-echo "Model Type: $MODEL_TYPE"
-echo "Dataset: $DATASET"
-echo "Patch Size: $PATCH_SIZE"
-echo "Compression Ratio: $COMPRESSION_RATIO"
-echo "Gamma Type: $GAMMA_TYPE"
-echo "L: $L"
-echo "Number of Samples: $NUM_SAMPLES"
-echo "Batch Size: $BATCH_SIZE"
+echo "Starting validation..."
 
 # Run validation
 python validate.py \
