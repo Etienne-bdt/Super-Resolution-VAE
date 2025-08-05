@@ -11,7 +11,7 @@ dependencies = [
     "numpy>=2.2.6",
     "polars>=1.30.0",
     "pre-commit>=4.2.0",
-    "ruff==0.12.0",
+    "ruff==0.12.7",
     "scikit-image>=0.25.2",
     "tensorboard>=2.19.0",
     "tifffile>=2025.5.21",
