@@ -4,7 +4,7 @@ import torch
 import torch.nn.functional as F
 
 
-def normalize_image(image: torch.Tensor) -> torch.Tensor:
+def normalize_image(image: torch.Tensor, quantile: float = 0.99) -> torch.Tensor:
     """
     Normalize the image tensor to the range [0, 1] for visualization.
     Args:
@@ -15,11 +15,15 @@ def normalize_image(image: torch.Tensor) -> torch.Tensor:
     if image.ndim == 3:
         # If the image is 3D (C, H, W)
         min_val = image.amin(dim=(1, 2), keepdim=True)
-        max_val = image.amax(dim=(1, 2), keepdim=True)
+        max_val = torch.quantile(
+            image.flatten(1), quantile, dim=-1, keepdim=True
+        ).unsqueeze(-1)
         normalized_image = (image - min_val) / (max_val - min_val + 1e-5)
     elif image.ndim == 4:
         min_val = image.amin(dim=(2, 3), keepdim=True)
-        max_val = image.amax(dim=(2, 3), keepdim=True)
+        max_val = torch.quantile(
+            image.flatten(2), quantile, dim=-1, keepdim=True
+        ).unsqueeze(-1)
         normalized_image = (image - min_val) / (max_val - min_val + 1e-5)
     else:
         raise ValueError("Input image must be 3D or 4D tensor.")
@@ -58,7 +62,9 @@ def norm_and_copy_image_dynamics(source: torch.Tensor, target: torch.Tensor):
     return normalized_source, target
 
 
-def get_contrast(image: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+def get_contrast(
+    image: torch.Tensor, quantile: float = 0.99
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Get the minimum and maximum pixel values of the image tensor.
     Args:
@@ -68,10 +74,14 @@ def get_contrast(image: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     if image.ndim == 3:
         min_val = image.amin(dim=(1, 2), keepdim=True)
-        max_val = image.amax(dim=(1, 2), keepdim=True)
+        max_val = torch.quantile(
+            image.flatten(1), quantile, dim=-1, keepdim=True
+        ).unsqueeze(-1)
     elif image.ndim == 4:
         min_val = image.amin(dim=(2, 3), keepdim=True)
-        max_val = image.amax(dim=(2, 3), keepdim=True)
+        max_val = torch.quantile(
+            image.flatten(2), quantile, dim=-1, keepdim=True
+        ).unsqueeze(-1)
     else:
         raise ValueError("Input image must be 3D or 4D tensor.")
     return (min_val, max_val)
