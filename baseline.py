@@ -17,7 +17,11 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     _, val_loader = init_dataloader("s2v", batch_size=1, patch_size=256)
     model = Cond_VAE(
-        cr=1.5, patch_size=256, gamma_type="scalar", slurm_job_id=slurm_job_id
+        cr=1.5, 
+        patch_size=256, 
+        gamma_type="scalar", 
+        slurm_job_id=slurm_job_id,
+        distribution_type="laplacian"  # Default to laplacian for backward compatibility
     )
 
     ckpt = torch.load("ckpt/3871151.pth", map_location="cpu")

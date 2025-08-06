@@ -262,3 +262,18 @@ def laplacian_sampling(mu, b):
     """
     u = torch.uniform(-0.5, 0.5, size=mu.shape, device=mu.device)
     return mu - b * torch.sign(u) * torch.log1p(-2 * u.abs())
+
+
+def gaussian_sampling(mu, sigma):
+    """
+    Sample from a Gaussian distribution with mean mu and standard deviation sigma.
+
+    Args:
+        mu (torch.Tensor): Mean of the Gaussian distribution.
+        sigma (torch.Tensor): Standard deviation of the Gaussian distribution.
+
+    Returns:
+        torch.Tensor: Samples from the Gaussian distribution.
+    """
+    eps = torch.randn_like(mu)
+    return mu + sigma * eps

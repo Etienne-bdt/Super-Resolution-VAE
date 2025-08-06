@@ -7,7 +7,7 @@ import wandb
 from tqdm import tqdm
 
 from loss import cond_loss
-from utils import laplacian_sampling
+from utils import laplacian_sampling, gaussian_sampling
 
 from .base import BaseVAE
 from .layers import conv_block, down_block, up_block
@@ -21,9 +21,13 @@ class Cond_VAE(BaseVAE):
     validation, and evaluation.
 
     Args:
-        latent_size (int): Size of the latent space.
+        cr (float): Compression ratio.
         patch_size (int): Size of the input image patches (default: 64).
         callbacks (list, optional): List of callbacks to use during training (default: None).
+        slurm_job_id (str): SLURM job ID for tracking (default: "local").
+        L (int): Number of samples to draw from the latent space (default: 1).
+        gamma_type (str): Type of gamma parameter, "scalar" or spatial (default: "scalar").
+        distribution_type (str): Type of decoder distribution, "laplacian" or "gaussian" (default: "laplacian").
     """
 
     def __init__(
@@ -34,6 +38,7 @@ class Cond_VAE(BaseVAE):
         slurm_job_id="local",
         L=1,
         gamma_type="scalar",
+        distribution_type="laplacian",
     ):
         if callbacks is None:
             callbacks = []
@@ -43,6 +48,7 @@ class Cond_VAE(BaseVAE):
         self.adjust = cr / 4  # Ensure latent size is a multiple of 4
         self.patch_size = patch_size
         self.gamma_type = gamma_type
+        self.distribution_type = distribution_type  # "laplacian" or "gaussian"
 
         self.cond_prior = nn.Sequential(
             down_block(in_channels=4, out_channels=64),  # out 16 , 16 , 16
@@ -225,6 +231,28 @@ class Cond_VAE(BaseVAE):
         else:
             return self.variance_decoder(z)
 
+    def sample_from_distribution(self, mean, variance, gamma_added=True):
+        """
+        Sample from the specified distribution (Laplacian or Gaussian).
+        
+        Args:
+            mean (torch.Tensor): Mean of the distribution.
+            variance (torch.Tensor): Variance parameter (gamma).
+            gamma_added (bool): Whether to add noise or return mean.
+            
+        Returns:
+            torch.Tensor: Sampled values.
+        """
+        if not gamma_added:
+            return mean
+            
+        if self.distribution_type == "laplacian":
+            # For Laplacian: b = sqrt(variance/2), where variance = 2*b^2
+            return laplacian_sampling(mean, variance)
+        else:  # gaussian
+            # For Gaussian: sigma = sqrt(variance)
+            return gaussian_sampling(mean, variance)
+
     def forward(self, x, y, L=1):
         # Forward pass through the VAE
         mu, logvar = self.encode(x, y)
@@ -262,6 +290,7 @@ class Cond_VAE(BaseVAE):
             cond_mu,
             cond_logvar,
             self.gamma,
+            self.distribution_type,
         )
         loss = mse + kld
         logs = {
@@ -292,6 +321,7 @@ class Cond_VAE(BaseVAE):
                 cond_mu,
                 cond_logvar,
                 self.gamma,
+                self.distribution_type,
             )
         loss = mse + kld
         logs = {
@@ -550,22 +580,17 @@ class Cond_VAE(BaseVAE):
         if y.shape[0] == 1:
             y = y.expand(samples, -1, -1, -1)  # Expand x to match samples
         mean_decode = self.decode(z, y)
-        """x_hat = (
-            mean_decode + torch.randn_like(mean_decode) * self.gamma
-            if gamma_added
-            else mean_decode
-        )
-        """
-        x_hat = laplacian_sampling(mean_decode, self.gamma.pow(2)) if gamma_added else mean_decode
+        x_hat = self.sample_from_distribution(mean_decode, self.gamma, gamma_added)
 
         x_hat, *_ = self.forward(x_hat, y, self.L) if recurrent else x_hat
-        x_hat = laplacian_sampling(x_hat, self.gamma.pow(2)) if gamma_added else x_hat
+        x_hat = self.sample_from_distribution(x_hat, self.gamma, gamma_added)
         return x_hat
 
 
 if __name__ == "__main__":
-    model = Cond_VAE(cr=1.5, patch_size=64)
+    model = Cond_VAE(cr=1.5, patch_size=64, distribution_type="laplacian")
     print(model)
+    print(f"Distribution type: {model.distribution_type}")
     print(model.adjust)
     y = torch.randn(1, 4, 32, 32)
     x = torch.randn(1, 4, 64, 64)  # Example input tensor

@@ -58,6 +58,7 @@ def main(args):
             slurm_job_id=slurm_job_id,
             L=L,
             gamma_type=args.gamma_type,
+            distribution_type=args.distribution_type,
         )
 
     else:
@@ -169,6 +170,14 @@ def parse_args():
         default="scalar",
         choices=["scalar", "vector"],
         help="Type of gamma to use in the model.",
+    )
+
+    parser.add_argument(
+        "--distribution_type",
+        type=str,
+        default="laplacian",
+        choices=["laplacian", "gaussian"],
+        help="Type of decoder distribution: 'laplacian' or 'gaussian'.",
     )
 
     parser.add_argument(

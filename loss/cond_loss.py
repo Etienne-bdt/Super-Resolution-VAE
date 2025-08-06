@@ -2,20 +2,24 @@ import torch
 import torch.nn.functional as F
 
 
-def cond_loss(recon_x, x, mu, logvar, cond_mu, cond_logvar, gamma):
+def cond_loss(recon_x, x, mu, logvar, cond_mu, cond_logvar, gamma, distribution_type="laplacian"):
     # Define the loss function for the VAE
     # Gamma is the variance of the prior
     x_shape = recon_x.shape
     if recon_x.ndim == 5:
         x = x.expand(x_shape[0], -1, -1, -1, -1)
 
-    # Compute MSE per pixel
-    # mse_per_pixel = F.mse_loss(recon_x, x, reduction="none").to(
-    #    gamma.device
-    # )  # (L, batch, chan, h, w)
-    mse_per_pixel = F.l1_loss(x, recon_x, reduction="none").to(
-        gamma.device
-    )  # (L, batch, chan, h, w)
+    # Compute reconstruction loss per pixel
+    if distribution_type == "laplacian":
+        # L1 loss for Laplacian distribution
+        recon_loss_per_pixel = F.l1_loss(x, recon_x, reduction="none").to(
+            gamma.device
+        )  # (L, batch, chan, h, w)
+    else:  # gaussian
+        # L2 loss for Gaussian distribution
+        recon_loss_per_pixel = F.mse_loss(recon_x, x, reduction="none").to(
+            gamma.device
+        )  # (L, batch, chan, h, w)
 
     if isinstance(gamma, torch.nn.Parameter):
         gamma_reshaped = gamma
@@ -29,17 +33,31 @@ def cond_loss(recon_x, x, mu, logvar, cond_mu, cond_logvar, gamma):
             )
         )  # (1, chan, h, w)
 
-    # Apply diagonal gamma weighting
-    if recon_x.ndim == 5:
-        mse = torch.sum(
-            mse_per_pixel / (2 * gamma_reshaped.pow(2)) + gamma_reshaped.log(),
-            dim=(2, 3, 4),  # Sum over spatial dimensions
-        ).mean()  # Average over batch and L dimensions
-    else:
-        mse = torch.sum(
-            mse_per_pixel / (gamma_reshaped.pow(2)) + 2 * gamma_reshaped.log(),
-            dim=(1, 2, 3),  # Sum over spatial dimensions
-        ).mean()
+    # Apply diagonal gamma weighting based on distribution type
+    if distribution_type == "laplacian":
+        # Laplacian negative log-likelihood
+        if recon_x.ndim == 5:
+            mse = torch.sum(
+                recon_loss_per_pixel / gamma_reshaped + gamma_reshaped.log(),
+                dim=(2, 3, 4),  # Sum over spatial dimensions
+            ).mean()  # Average over batch and L dimensions
+        else:
+            mse = torch.sum(
+                recon_loss_per_pixel / gamma_reshaped + gamma_reshaped.log(),
+                dim=(1, 2, 3),  # Sum over spatial dimensions
+            ).mean()
+    else:  # gaussian
+        # Gaussian negative log-likelihood
+        if recon_x.ndim == 5:
+            mse = torch.sum(
+                recon_loss_per_pixel / (2 * gamma_reshaped.pow(2)) + gamma_reshaped.log(),
+                dim=(2, 3, 4),  # Sum over spatial dimensions
+            ).mean()  # Average over batch and L dimensions
+        else:
+            mse = torch.sum(
+                recon_loss_per_pixel / (2 * gamma_reshaped.pow(2)) + gamma_reshaped.log(),
+                dim=(1, 2, 3),  # Sum over spatial dimensions
+            ).mean()
 
     kld = (
         0.5
