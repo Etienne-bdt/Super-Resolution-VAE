@@ -337,7 +337,9 @@ class Cond_VAE(BaseVAE):
         first = epoch == 1
         if full_val:
             total_pixels = 0
-            total_ssim = 0.0
+            total_ssim_recurrent = 0.0
+            total_ssim_no_recurrent = 0.0
+            total_ssim_reconstruction = 0.0
             total_lpips = 0.0
             first_batch = True
 
@@ -345,22 +347,52 @@ class Cond_VAE(BaseVAE):
                 y, x = batch
                 x, y = x.to(device), y.to(device)
                 with torch.no_grad():
-                    x_hat = self.sample(y, y.shape[0], gamma_added=True)
+                    # Sample with recurrent=True (default behavior)
+                    x_hat_recurrent = self.sample(y, y.shape[0], gamma_added=True, recurrent=True)
+                    # Sample with recurrent=False
+                    x_hat_no_recurrent = self.sample(y, y.shape[0], gamma_added=True, recurrent=False)
+                    # Direct reconstruction from forward pass
+                    x_hat_reconstruction, _, _, _ = self.forward(x, y)
+                    
                 b = x.size(0)
                 total_pixels += b
 
                 # per-sample metrics
-                for orig, recon in zip(x, x_hat):
-                    ssim = self.ssim(
+                for orig, recon_rec, recon_no_rec, recon_direct in zip(x, x_hat_recurrent, x_hat_no_recurrent, x_hat_reconstruction):
+                    # SSIM with recurrent sampling
+                    ssim_recurrent = self.ssim(
                         orig.cpu().numpy(),
-                        recon.cpu().numpy(),
+                        recon_rec.cpu().numpy(),
                         data_range=1.0,
                         channel_axis=0,
                     )
-                    total_ssim += ssim
+                    total_ssim_recurrent += ssim_recurrent
+                    
+                    # SSIM without recurrent sampling
+                    ssim_no_recurrent = self.ssim(
+                        orig.cpu().numpy(),
+                        recon_no_rec.cpu().numpy(),
+                        data_range=1.0,
+                        channel_axis=0,
+                    )
+                    total_ssim_no_recurrent += ssim_no_recurrent
+                    
+                    # SSIM for direct reconstruction
+                    ssim_reconstruction = self.ssim(
+                        orig.cpu().numpy(),
+                        recon_direct.cpu().numpy(),
+                        data_range=1.0,
+                        channel_axis=0,
+                    )
+                    total_ssim_reconstruction += ssim_reconstruction
+                    
+                    # LPIPS using recurrent reconstruction
                     total_lpips += self.lpips_fn(
-                        orig[[2, 1, 0]].unsqueeze(0), recon[[2, 1, 0]].unsqueeze(0)
+                        orig[[2, 1, 0]].unsqueeze(0), recon_rec[[2, 1, 0]].unsqueeze(0)
                     ).item()
+
+                # For backward compatibility, use recurrent sampling for image logging
+                x_hat = x_hat_recurrent
 
                 # capture first batch for image logging
                 if first_batch:
@@ -454,12 +486,21 @@ class Cond_VAE(BaseVAE):
                     first_batch = False
 
             # compute averages
-            avg_ssim = total_ssim / total_pixels
+            avg_ssim_recurrent = total_ssim_recurrent / total_pixels
+            avg_ssim_no_recurrent = total_ssim_no_recurrent / total_pixels
+            avg_ssim_reconstruction = total_ssim_reconstruction / total_pixels
             avg_lpips = total_lpips / total_pixels
 
             # log aggregate metrics
             wandb_run.log(
-                {"Metrics/SSIM": avg_ssim, "Metrics/LPIPS": avg_lpips},
+                {
+                    "Metrics/SSIM_Recurrent": avg_ssim_recurrent,
+                    "Metrics/SSIM_No_Recurrent": avg_ssim_no_recurrent,
+                    "Metrics/SSIM_Reconstruction": avg_ssim_reconstruction,
+                    "Metrics/LPIPS": avg_lpips,
+                    # Keep original SSIM for backward compatibility
+                    "Metrics/SSIM": avg_ssim_recurrent,
+                },
                 step=epoch,
             )
 
