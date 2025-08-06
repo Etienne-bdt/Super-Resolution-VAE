@@ -10,7 +10,10 @@ def cond_loss(recon_x, x, mu, logvar, cond_mu, cond_logvar, gamma):
         x = x.expand(x_shape[0], -1, -1, -1, -1)
 
     # Compute MSE per pixel
-    mse_per_pixel = F.mse_loss(recon_x, x, reduction="none").to(
+    # mse_per_pixel = F.mse_loss(recon_x, x, reduction="none").to(
+    #    gamma.device
+    # )  # (L, batch, chan, h, w)
+    mse_per_pixel = F.l1_loss(x, recon_x, reduction="none").to(
         gamma.device
     )  # (L, batch, chan, h, w)
 
@@ -34,7 +37,7 @@ def cond_loss(recon_x, x, mu, logvar, cond_mu, cond_logvar, gamma):
         ).mean()  # Average over batch and L dimensions
     else:
         mse = torch.sum(
-            mse_per_pixel / (2 * gamma_reshaped.pow(2)) + gamma_reshaped.log(),
+            mse_per_pixel / (gamma_reshaped.pow(2)) + 2 * gamma_reshaped.log(),
             dim=(1, 2, 3),  # Sum over spatial dimensions
         ).mean()
 

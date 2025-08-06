@@ -1,5 +1,6 @@
 from typing import Tuple
 
+import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
 
@@ -218,3 +219,32 @@ def quantile_map(samples: torch.Tensor, quantile: float) -> torch.Tensor:
     distance_thresholds = distances[distance_limit]  # (npixels)
 
     return distance_thresholds.view(h, w)  # (h, w)
+
+
+def save_img(x: torch.Tensor, filename: str, false_color: bool = False) -> None:
+    """
+    Save the image tensor to a file.
+
+    Args:
+        x (torch.Tensor): Image tensor of shape (C, H, W) or (B, C, H, W).
+        filename (str): Path to save the image.
+        false_color (bool): If True, apply false color mapping.
+    """
+    if x.ndim == 4:
+        x = x[0]
+    elif x.ndim == 2:
+        x = x.unsqueeze(0)
+    elif x.ndim != 3:
+        raise ValueError(
+            "Input image must be a 2D (H, W), 3D (C, H, W) or 4D (B, C, H, W) tensor."
+        )
+
+    if not false_color and x.shape[0] == 4:
+        # Apply false color mapping
+        x = x[[2, 1, 0], :, :]
+    else:
+        x = x[[3, 2, 1], :, :]
+
+    x_numpy = x.clamp(0, 1).permute(1, 2, 0).cpu().numpy()
+    plt.imsave(filename, x_numpy)
+    plt.close()
