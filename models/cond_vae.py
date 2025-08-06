@@ -354,6 +354,10 @@ class Cond_VAE(BaseVAE):
                     # Direct reconstruction from forward pass
                     x_hat_reconstruction, _, _, _ = self.forward(x, y)
                     
+                if first_batch:
+                    print("Sizes:")
+                    print(f"x: {x.size()}, x_hat_recurrent: {x_hat_recurrent.size()}, x_hat_no_recurrent: {x_hat_no_recurrent.size()}, x_hat_reconstruction: {x_hat_reconstruction.size()}")
+
                 b = x.size(0)
                 total_pixels += b
 
