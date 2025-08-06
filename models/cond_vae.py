@@ -7,6 +7,7 @@ import wandb
 from tqdm import tqdm
 
 from loss import cond_loss
+from utils import laplacian_sampling
 
 from .base import BaseVAE
 from .layers import conv_block, down_block, up_block
@@ -314,7 +315,7 @@ class Cond_VAE(BaseVAE):
                 y, x = batch
                 x, y = x.to(device), y.to(device)
                 with torch.no_grad():
-                    x_hat = self.sample(y, y.shape[0], gamma_added=False)
+                    x_hat = self.sample(y, y.shape[0], gamma_added=True)
                 b = x.size(0)
                 total_pixels += b
 
@@ -438,7 +439,7 @@ class Cond_VAE(BaseVAE):
             x = x.to(device)
             y = y.to(device)
             with torch.no_grad():
-                x_hat = self.sample(y, y.shape[0], gamma_added=False)
+                x_hat = self.sample(y, y.shape[0], gamma_added=True)
                 imgs_in = y[:4]
                 imgs_out = x_hat[:4]
 
@@ -549,13 +550,16 @@ class Cond_VAE(BaseVAE):
         if y.shape[0] == 1:
             y = y.expand(samples, -1, -1, -1)  # Expand x to match samples
         mean_decode = self.decode(z, y)
-        x_hat = (
+        """x_hat = (
             mean_decode + torch.randn_like(mean_decode) * self.gamma
             if gamma_added
             else mean_decode
         )
+        """
+        x_hat = laplacian_sampling(mean_decode, self.gamma.pow(2)) if gamma_added else mean_decode
 
         x_hat, *_ = self.forward(x_hat, y, self.L) if recurrent else x_hat
+        x_hat = laplacian_sampling(x_hat, self.gamma.pow(2)) if gamma_added else x_hat
         return x_hat
 
 

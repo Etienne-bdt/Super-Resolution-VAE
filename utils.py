@@ -248,3 +248,17 @@ def save_img(x: torch.Tensor, filename: str, false_color: bool = False) -> None:
     x_numpy = x.clamp(0, 1).permute(1, 2, 0).cpu().numpy()
     plt.imsave(filename, x_numpy)
     plt.close()
+
+def laplacian_sampling(mu, b):
+    """
+    Sample from a Laplacian distribution with mean mu and scale b.
+
+    Args:
+        mu (torch.Tensor): Mean of the Laplacian distribution.
+        b (torch.Tensor): Scale parameter of the Laplacian distribution.
+
+    Returns:
+        torch.Tensor: Samples from the Laplacian distribution.
+    """
+    u = torch.uniform(-0.5, 0.5, size=mu.shape, device=mu.device)
+    return mu - b * torch.sign(u) * torch.log1p(-2 * u.abs())
