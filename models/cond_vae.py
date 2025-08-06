@@ -623,8 +623,10 @@ class Cond_VAE(BaseVAE):
         mean_decode = self.decode(z, y)
         x_hat = self.sample_from_distribution(mean_decode, self.gamma, gamma_added)
 
-        x_hat, *_ = self.forward(x_hat, y, self.L) if recurrent else x_hat
-        x_hat = self.sample_from_distribution(x_hat, self.gamma, gamma_added)
+
+        if recurrent:
+            x_hat, *_ = self.forward(x_hat, y)
+            x_hat = self.sample_from_distribution(x_hat, self.gamma, gamma_added)
         return x_hat
 
 
