@@ -625,14 +625,15 @@ class Cond_VAE(BaseVAE):
         if y.shape[0] == 1:
             y = y.expand(samples, -1, -1, -1)  # Expand x to match samples
         mean_decode = self.decode(z, y)
-        x_hat = self.sample_from_distribution(mean_decode, self.gamma, gamma_added)
 
 
         if recurrent:
+            x_hat = self.sample_from_distribution(mean_decode, self.gamma, gamma_added)
             x_hat, *_ = self.forward(x_hat, y)
-            x_hat = self.sample_from_distribution(x_hat, self.gamma, gamma_added)
-        return x_hat
-
+            x_hat = self.sample_from_distribution(x_hat, self.gamma, gamma_added=False)
+            return x_hat
+        else:
+            return mean_decode
 
 if __name__ == "__main__":
     model = Cond_VAE(cr=1.5, patch_size=64, distribution_type="laplacian")
