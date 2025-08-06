@@ -80,6 +80,9 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
                     "gamma_type": self.gamma_type
                     if hasattr(self, "gamma_type")
                     else "scalar",
+                    "distribution_type": self.distribution_type
+                    if hasattr(self, "distribution_type")
+                    else "gaussian",
                 },
             ),
         )

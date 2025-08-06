@@ -260,7 +260,7 @@ def laplacian_sampling(mu, b):
     Returns:
         torch.Tensor: Samples from the Laplacian distribution.
     """
-    u = torch.uniform(-0.5, 0.5, size=mu.shape, device=mu.device)
+    u = torch.rand(size=mu.shape, device=mu.device) - 0.5
     return mu - b * torch.sign(u) * torch.log1p(-2 * u.abs())
 
 
