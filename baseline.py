@@ -24,7 +24,7 @@ def main():
         distribution_type="laplacian"  # Default to laplacian for backward compatibility
     )
 
-    ckpt = torch.load("ckpt/3871151.pth", map_location="cpu")
+    ckpt = torch.load("ckpt/3871425.pth", map_location="cpu")
     print(ckpt.keys())
     model.load_state_dict(ckpt)
     model.eval()
@@ -94,7 +94,7 @@ def main():
 
     # Save the worst and best images
     worst_y, worst_x = val_loader.dataset[idx_min]
-    model_worse = model.sample(worst_y.unsqueeze(0).to(device), 1, gamma_added=False)[
+    model_worse = model.sample(worst_y.unsqueeze(0).to(device), 1, gamma_added=True, recurrent=True)[
         0
     ].detach()
     worst_bicubic = F.interpolate(
@@ -104,7 +104,7 @@ def main():
     )[0].detach()
 
     best_y, best_x = val_loader.dataset[idx_max]
-    model_best = model.sample(best_y.unsqueeze(0).to(device), 1, gamma_added=False)[
+    model_best = model.sample(best_y.unsqueeze(0).to(device), 1, gamma_added=True, recurrent=True)[
         0
     ].detach()
     best_bicubic = F.interpolate(
