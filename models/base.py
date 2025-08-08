@@ -312,7 +312,7 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
         pred, target = self.get_task_data(val_loader)
 
         with torch.no_grad():
-            samples = self.sample(pred)
+            samples = self.sample(pred, gamma_added=False, recurrent=False)
             if self.gamma_type == "scalar":
                 gamma = self.gamma
             else:
