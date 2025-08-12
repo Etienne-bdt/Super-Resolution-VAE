@@ -1,5 +1,6 @@
 import argparse
 import csv
+import importlib.util as importlib_util
 import json
 import os
 
@@ -60,6 +61,103 @@ def _plot_per_model_barchart(summary_rows: list[dict], out_dir: str, model_tag: 
     plt.legend()
     plt.tight_layout()
     plt.savefig(os.path.join(out_dir, "barchart.png"), dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def _plot_per_model_barchart_lpips(summary_rows: list[dict], out_dir: str, model_tag: str) -> None:
+    """Create a per-model bar chart for LPIPS (lower is better)."""
+    # If LPIPS not available, skip gracefully
+    if not any("model_lpips_mean" in r for r in summary_rows):
+        return
+    summary_rows_sorted = sorted(
+        summary_rows,
+        key=lambda r: (r["gamma_first"], r["recurrent"], r["gamma_second"])  # type: ignore[index]
+    )
+    labels = [
+        _config_label(bool(r["gamma_first"]), bool(r["recurrent"]), bool(r["gamma_second"]))  # type: ignore[index]
+        for r in summary_rows_sorted
+    ]
+    means = [float(r.get("model_lpips_mean", 0.0)) for r in summary_rows_sorted]
+    errs = [float(r.get("model_lpips_std", 0.0)) for r in summary_rows_sorted]
+
+    bicubic_mean = float(summary_rows_sorted[0].get("bicubic_lpips_mean", 0.0)) if summary_rows_sorted else 0.0
+    bicubic_std = float(summary_rows_sorted[0].get("bicubic_lpips_std", 0.0)) if summary_rows_sorted else 0.0
+
+    plt.figure(figsize=(12, 6))
+    x = np.arange(len(labels))
+    plt.bar(x, means, yerr=errs, capsize=4, color="#60BD68", alpha=0.9)
+    plt.axhline(bicubic_mean, color="#F17CB0", linestyle="--", label=f"Bicubic LPIPS = {bicubic_mean:.4f}")
+    if bicubic_std > 0:
+        plt.fill_between(
+            [x[0] - 0.6, x[-1] + 0.6],
+            [bicubic_mean - bicubic_std, bicubic_mean - bicubic_std],
+            [bicubic_mean + bicubic_std, bicubic_mean + bicubic_std],
+            color="#F17CB0",
+            alpha=0.12,
+            label="Bicubic ±1σ",
+        )
+    plt.xticks(x, labels, rotation=0)
+    plt.ylabel("LPIPS mean ± std (lower is better)")
+    plt.title(f"{model_tag}: LPIPS across sampling configs")
+    plt.grid(True, axis="y", alpha=0.3, linestyle=":")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_dir, "barchart_lpips.png"), dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def _plot_per_model_barchart_mmse(summary_rows: list[dict], out_dir: str, model_tag: str, metric: str = "ssim") -> None:
+    """Create a per-model bar chart for MMSE using the given metric ('ssim' or 'lpips')."""
+    assert metric in {"ssim", "lpips"}
+    summary_rows_sorted = sorted(
+        summary_rows,
+        key=lambda r: (r["gamma_first"], r["recurrent"], r["gamma_second"])  # type: ignore[index]
+    )
+    labels = [
+        _config_label(bool(r["gamma_first"]), bool(r["recurrent"]), bool(r["gamma_second"]))  # type: ignore[index]
+        for r in summary_rows_sorted
+    ]
+    if metric == "ssim":
+        means = [float(r.get("mmse_ssim_mean", 0.0)) for r in summary_rows_sorted]
+        errs = [float(r.get("mmse_ssim_std", 0.0)) for r in summary_rows_sorted]
+        ref_mean = float(summary_rows_sorted[0].get("bicubic_mean", 0.0)) if summary_rows_sorted else 0.0
+        ref_std = float(summary_rows_sorted[0].get("bicubic_std", 0.0)) if summary_rows_sorted else 0.0
+        ylabel = "MMSE SSIM mean ± std"
+        title = f"{model_tag}: MMSE SSIM across sampling configs"
+        color = "#5DA5DA"
+    else:
+        means = [float(r.get("mmse_lpips_mean", 0.0)) for r in summary_rows_sorted]
+        errs = [float(r.get("mmse_lpips_std", 0.0)) for r in summary_rows_sorted]
+        ref_mean = float(summary_rows_sorted[0].get("bicubic_lpips_mean", 0.0)) if summary_rows_sorted else 0.0
+        ref_std = float(summary_rows_sorted[0].get("bicubic_lpips_std", 0.0)) if summary_rows_sorted else 0.0
+        ylabel = "MMSE LPIPS mean ± std (lower is better)"
+        title = f"{model_tag}: MMSE LPIPS across sampling configs"
+        color = "#60BD68"
+
+    plt.figure(figsize=(12, 6))
+    x = np.arange(len(labels))
+    plt.bar(x, means, yerr=errs, capsize=4, color=color, alpha=0.9)
+    if metric == "ssim":
+        plt.axhline(ref_mean, color="#F17CB0", linestyle="--", label=f"Bicubic SSIM = {ref_mean:.4f}")
+    else:
+        plt.axhline(ref_mean, color="#F17CB0", linestyle="--", label=f"Bicubic LPIPS = {ref_mean:.4f}")
+    if ref_std > 0:
+        plt.fill_between(
+            [x[0] - 0.6, x[-1] + 0.6],
+            [ref_mean - ref_std, ref_mean - ref_std],
+            [ref_mean + ref_std, ref_mean + ref_std],
+            color="#F17CB0",
+            alpha=0.12,
+            label="Bicubic ±1σ",
+        )
+    plt.xticks(x, labels, rotation=0)
+    plt.ylabel(ylabel)
+    plt.title(title)
+    plt.grid(True, axis="y", alpha=0.3, linestyle=":")
+    plt.legend()
+    plt.tight_layout()
+    suffix = "mmse_ssim" if metric == "ssim" else "mmse_lpips"
+    plt.savefig(os.path.join(out_dir, f"barchart_{suffix}.png"), dpi=300, bbox_inches="tight")
     plt.close()
 
 
@@ -206,7 +304,8 @@ def compute_bicubic_ssim(val_loader, device) -> np.ndarray:
 def evaluate_config(model: Cond_VAE, val_loader, device, out_dir: str,
                     gamma_first: bool, recurrent: bool, gamma_second: bool,
                     bicubic_cache: np.ndarray | None,
-                    index_to_log: int = 980) -> dict:
+                    index_to_log: int = 980,
+                    samples_for_mmse: int = 50) -> dict:
     """
     Evaluate one (gamma_first, recurrent, gamma_second) config.
     Returns a dict with summary metrics. Saves logs for index_to_log into out_dir.
@@ -220,6 +319,21 @@ def evaluate_config(model: Cond_VAE, val_loader, device, out_dir: str,
     # Use provided bicubic cache or compute on the fly (first run should pass cache)
     if bicubic_cache is None:
         bicubic_cache = compute_bicubic_ssim(val_loader, device)
+
+    # Prepare LPIPS loss (AlexNet backbone) as optional
+    lpips_fn = None
+    if importlib_util.find_spec("lpips") is not None:  # runtime optional dependency
+        from lpips import LPIPS  # type: ignore
+
+        lpips_fn = LPIPS(net="alex").to(device)
+        lpips_fn.eval()
+
+    # Containers for metrics
+    mmse_ssim = np.zeros(len(val_loader), dtype=np.float32)
+    # LPIPS arrays (only if available)
+    bicubic_lp = np.zeros(len(val_loader), dtype=np.float32)
+    model_lp = np.zeros(len(val_loader), dtype=np.float32)
+    mmse_lp = np.zeros(len(val_loader), dtype=np.float32)
 
     # Evaluate over validation set
     for i, (y, x) in enumerate(
@@ -246,42 +360,89 @@ def evaluate_config(model: Cond_VAE, val_loader, device, out_dir: str,
             data_range=1.0,
             channel_axis=0,
         )
+
+        # MMSE via multiple samples
+        samples = sample_with_flags(
+            model,
+            y,
+            samples=samples_for_mmse,
+            gamma_added_first=gamma_first,
+            recurrent=recurrent,
+            gamma_added_second=gamma_second,
+        )
+        mmse_img = samples.mean(dim=0, keepdim=True)  # (1, C, H, W)
+        mmse_ssim[i] = skimetrics.structural_similarity(
+            mmse_img[0].cpu().numpy(),
+            x[0].cpu().numpy(),
+            data_range=1.0,
+            channel_axis=0,
+        )
+
+        # LPIPS computations (use bands [2,1,0] and range [-1,1])
+        def to_lpips_3ch(t: torch.Tensor) -> torch.Tensor:
+            if t.dim() == 3:
+                t = t.unsqueeze(0)
+            t3 = t[:, [2, 1, 0], :, :].clamp(0, 1)
+            return (t3 * 2.0) - 1.0
+
+        if lpips_fn is not None:
+            bicubic_i = F.interpolate(y, scale_factor=2, mode="bicubic")  # (1, C, H, W)
+            bicubic_lp[i] = float(lpips_fn(to_lpips_3ch(bicubic_i), to_lpips_3ch(x)).mean().item())
+            model_lp[i] = float(lpips_fn(to_lpips_3ch(out), to_lpips_3ch(x)).mean().item())
+            mmse_lp[i] = float(lpips_fn(to_lpips_3ch(mmse_img), to_lpips_3ch(x)).mean().item())
         # Specific logging for index_to_log
         if i == index_to_log:
             y_i, x_i = y[0].detach(), x[0].detach()
             out_i = out[0].detach()
-            bicubic_i = F.interpolate(y, scale_factor=2, mode="bicubic")[0].detach()
+            bicubic_i_vis = F.interpolate(y, scale_factor=2, mode="bicubic")[0].detach()
 
             save_img(x_i, os.path.join(out_dir, f"idx{index_to_log}_x.png"))
             save_img(y_i, os.path.join(out_dir, f"idx{index_to_log}_y.png"))
-            save_img(bicubic_i, os.path.join(out_dir, f"idx{index_to_log}_bicubic.png"))
+            save_img(bicubic_i_vis, os.path.join(out_dir, f"idx{index_to_log}_bicubic.png"))
             save_img(out_i, os.path.join(out_dir, f"idx{index_to_log}_model.png"))
+            save_img(mmse_img[0].detach(), os.path.join(out_dir, f"idx{index_to_log}_mmse.png"))
 
             # False color versions
             save_img(x_i, os.path.join(out_dir, f"idx{index_to_log}_x_false_color.png"), false_color=True)
             save_img(y_i, os.path.join(out_dir, f"idx{index_to_log}_y_false_color.png"), false_color=True)
-            save_img(bicubic_i, os.path.join(out_dir, f"idx{index_to_log}_bicubic_false_color.png"), false_color=True)
+            save_img(bicubic_i_vis, os.path.join(out_dir, f"idx{index_to_log}_bicubic_false_color.png"), false_color=True)
             save_img(out_i, os.path.join(out_dir, f"idx{index_to_log}_model_false_color.png"), false_color=True)
+            save_img(mmse_img[0].detach(), os.path.join(out_dir, f"idx{index_to_log}_mmse_false_color.png"), false_color=True)
 
             # Histograms
             save_img_histogram(x_i, os.path.join(out_dir, f"idx{index_to_log}_x_histogram.png"))
             save_img_histogram(y_i, os.path.join(out_dir, f"idx{index_to_log}_y_histogram.png"))
             save_img_histogram(out_i, os.path.join(out_dir, f"idx{index_to_log}_model_histogram.png"))
+            save_img_histogram(mmse_img[0].detach(), os.path.join(out_dir, f"idx{index_to_log}_mmse_histogram.png"))
 
     # Summary metrics
     metrics = {
+        # SSIM
         "bicubic_mean": float(bicubic_cache.mean()),
         "bicubic_std": float(bicubic_cache.std(ddof=0)),
         "model_mean": float(model_ssim.mean()),
         "model_std": float(model_ssim.std(ddof=0)),
+        "mmse_ssim_mean": float(mmse_ssim.mean()),
+        "mmse_ssim_std": float(mmse_ssim.std(ddof=0)),
         "improvement": float(model_ssim.mean() - bicubic_cache.mean()),
     }
+    # Conditionally add LPIPS metrics
+    if lpips_fn is not None:
+        metrics.update({
+            "bicubic_lpips_mean": float(bicubic_lp.mean()),
+            "bicubic_lpips_std": float(bicubic_lp.std(ddof=0)),
+            "model_lpips_mean": float(model_lp.mean()),
+            "model_lpips_std": float(model_lp.std(ddof=0)),
+            "mmse_lpips_mean": float(mmse_lp.mean()),
+            "mmse_lpips_std": float(mmse_lp.std(ddof=0)),
+        })
 
     # Save histogram for the SSIM distributions
     plt.figure(figsize=(10, 6))
     bin_edges = np.linspace(0.5, 1.0, 100)  # fixed bins across runs
     plt.hist(bicubic_cache, bins=bin_edges, alpha=0.7, label="Bicubic SSIM", color="blue", density=True)
     plt.hist(model_ssim, bins=bin_edges, alpha=0.7, label="Model SSIM", color="red", density=True)
+    plt.hist(mmse_ssim, bins=bin_edges, alpha=0.7, label="MMSE SSIM", color="green", density=True)
     plt.xlabel("SSIM Score")
     plt.ylabel("Density")
     plt.title("Distribution of SSIM Scores: Bicubic vs Model")
@@ -290,6 +451,21 @@ def evaluate_config(model: Cond_VAE, val_loader, device, out_dir: str,
     plt.xlim(0, 1)
     plt.savefig(os.path.join(out_dir, "ssim_histogram.png"), dpi=300, bbox_inches="tight")
     plt.close()
+
+    # Save histogram for LPIPS distributions (lower is better) only if computed
+    if lpips_fn is not None:
+        plt.figure(figsize=(10, 6))
+        lp_bins = np.linspace(0.0, max(1.0, float(max(bicubic_lp.max(), model_lp.max(), mmse_lp.max()))), 100)
+        plt.hist(bicubic_lp, bins=lp_bins, alpha=0.7, label="Bicubic LPIPS", color="#7A68A6", density=True)
+        plt.hist(model_lp, bins=lp_bins, alpha=0.7, label="Model LPIPS", color="#60BD68", density=True)
+        plt.hist(mmse_lp, bins=lp_bins, alpha=0.7, label="MMSE LPIPS", color="#F15854", density=True)
+        plt.xlabel("LPIPS (lower is better)")
+        plt.ylabel("Density")
+        plt.title("Distribution of LPIPS: Bicubic vs Model vs MMSE")
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.savefig(os.path.join(out_dir, "lpips_histogram.png"), dpi=300, bbox_inches="tight")
+        plt.close()
 
     # Save metrics JSON
     with open(os.path.join(out_dir, "metrics.json"), "w", encoding="utf-8") as f:
@@ -364,7 +540,15 @@ def evaluate_model_grid(model: Cond_VAE, model_tag: str, val_loader, device,
                 "bicubic_std",
                 "model_mean",
                 "model_std",
+                "mmse_ssim_mean",
+                "mmse_ssim_std",
                 "improvement",
+                "bicubic_lpips_mean",
+                "bicubic_lpips_std",
+                "model_lpips_mean",
+                "model_lpips_std",
+                "mmse_lpips_mean",
+                "mmse_lpips_std",
             ],
         )
         writer.writeheader()
@@ -376,6 +560,17 @@ def evaluate_model_grid(model: Cond_VAE, model_tag: str, val_loader, device,
         _plot_per_model_barchart(summary_rows, base_out_dir, model_tag)
     except (ValueError, RuntimeError, OSError) as e:
         print(f"Warning: failed to create per-model barchart for {model_tag}: {e}")
+    # Create LPIPS barchart
+    try:
+        _plot_per_model_barchart_lpips(summary_rows, base_out_dir, model_tag)
+    except (ValueError, RuntimeError, OSError) as e:
+        print(f"Warning: failed to create per-model LPIPS barchart for {model_tag}: {e}")
+    # Create MMSE barcharts
+    try:
+        _plot_per_model_barchart_mmse(summary_rows, base_out_dir, model_tag, metric="ssim")
+        _plot_per_model_barchart_mmse(summary_rows, base_out_dir, model_tag, metric="lpips")
+    except (ValueError, RuntimeError, OSError) as e:
+        print(f"Warning: failed to create per-model MMSE barcharts for {model_tag}: {e}")
 
 
 def parse_args():
