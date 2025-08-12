@@ -1,11 +1,11 @@
-import os
 import argparse
-import json
 import csv
+import json
+import os
 
 import matplotlib.pyplot as plt
 import numpy as np
-from skimage.metrics import structural_similarity as ssim
+import skimage.metrics as skimetrics
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
@@ -13,6 +13,136 @@ from tqdm import tqdm
 from dataset import init_dataloader
 from models import Cond_VAE
 from utils import save_img, save_img_histogram
+
+
+def _config_label(g1: bool, rec: bool, g2: bool) -> str:
+    """Short label for a (gamma_first, recurrent, gamma_second) config."""
+    return f"g1-{int(g1)}\nrec-{int(rec)}\ng2-{int(g2)}"
+
+
+def _plot_per_model_barchart(summary_rows: list[dict], out_dir: str, model_tag: str) -> None:
+    """Create a per-model bar chart of SSIM means with error bars and bicubic band."""
+    # Order rows in a stable config order: g1 in [0,1], rec in [0,1], g2 in [0,1]
+    summary_rows_sorted = sorted(
+        summary_rows,
+        key=lambda r: (r["gamma_first"], r["recurrent"], r["gamma_second"])  # type: ignore[index]
+    )
+
+    labels = [
+        _config_label(bool(r["gamma_first"]), bool(r["recurrent"]), bool(r["gamma_second"]))  # type: ignore[index]
+        for r in summary_rows_sorted
+    ]
+    means = [float(r["model_mean"]) for r in summary_rows_sorted]
+    errs = [float(r.get("model_std", 0.0)) for r in summary_rows_sorted]
+
+    # Bicubic reference (same across rows)
+    bicubic_mean = float(summary_rows_sorted[0]["bicubic_mean"]) if summary_rows_sorted else 0.0
+    bicubic_std = float(summary_rows_sorted[0].get("bicubic_std", 0.0)) if summary_rows_sorted else 0.0
+
+    plt.figure(figsize=(12, 6))
+    x = np.arange(len(labels))
+    plt.bar(x, means, yerr=errs, capsize=4, color="#5DA5DA", alpha=0.9)
+    plt.axhline(bicubic_mean, color="#F17CB0", linestyle="--", label=f"Bicubic mean = {bicubic_mean:.4f}")
+    if bicubic_std > 0:
+        plt.fill_between(
+            [x[0] - 0.6, x[-1] + 0.6],
+            [bicubic_mean - bicubic_std, bicubic_mean - bicubic_std],
+            [bicubic_mean + bicubic_std, bicubic_mean + bicubic_std],
+            color="#F17CB0",
+            alpha=0.12,
+            label="Bicubic ±1σ",
+        )
+    plt.xticks(x, labels, rotation=0)
+    plt.ylabel("SSIM mean ± std")
+    plt.title(f"{model_tag}: SSIM across sampling configs")
+    plt.ylim(0, 1)
+    plt.grid(True, axis="y", alpha=0.3, linestyle=":")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_dir, "barchart.png"), dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def _plot_global_barchart(results_root: str, model_summaries: list[tuple[str, str]]) -> None:
+    """Create a global grouped bar chart across available models for each sampling config.
+
+    model_summaries: list of tuples (model_tag, model_dir) where model_dir contains summary.csv
+    """
+    if not model_summaries:
+        return
+
+    # Read summaries
+    per_model = {}
+    configs = []
+    for model_tag, model_dir in model_summaries:
+        csv_path = os.path.join(model_dir, "summary.csv")
+        if not os.path.exists(csv_path):
+            continue
+        rows = []
+        with open(csv_path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for r in reader:
+                # Normalize ints
+                r["gamma_first"] = int(r["gamma_first"]) if "gamma_first" in r else 0
+                r["recurrent"] = int(r["recurrent"]) if "recurrent" in r else 0
+                r["gamma_second"] = int(r["gamma_second"]) if "gamma_second" in r else 0
+                rows.append(r)
+        rows = sorted(rows, key=lambda r: (r["gamma_first"], r["recurrent"], r["gamma_second"]))
+        per_model[model_tag] = rows
+        if not configs and rows:
+            configs = [
+                (r["gamma_first"], r["recurrent"], r["gamma_second"]) for r in rows
+            ]
+
+    if not per_model:
+        return
+
+    # X positions per config
+    n_configs = len(configs)
+    model_tags = list(per_model.keys())
+    n_models = len(model_tags)
+    x = np.arange(n_configs)
+    total_width = 0.8
+    bar_width = total_width / max(n_models, 1)
+
+    # Colors list
+    colors = ["#5DA5DA", "#F15854", "#60BD68", "#FAA43A", "#B276B2", "#DECF3F"]
+
+    plt.figure(figsize=(max(12, 3 * n_configs), 6))
+
+    # Bicubic reference from first available model
+    first_rows = next(iter(per_model.values()))
+    bicubic_mean = float(first_rows[0].get("bicubic_mean", 0.0)) if first_rows else 0.0
+    bicubic_std = float(first_rows[0].get("bicubic_std", 0.0)) if first_rows else 0.0
+    plt.axhline(bicubic_mean, color="#7A68A6", linestyle="--", label=f"Bicubic mean = {bicubic_mean:.4f}")
+    if bicubic_std > 0:
+        plt.fill_between(
+            [-0.6, n_configs - 1 + 0.6],
+            [bicubic_mean - bicubic_std, bicubic_mean - bicubic_std],
+            [bicubic_mean + bicubic_std, bicubic_mean + bicubic_std],
+            color="#7A68A6",
+            alpha=0.12,
+            label="Bicubic ±1σ",
+        )
+
+    for m_idx, model_tag in enumerate(model_tags):
+        rows = per_model[model_tag]
+        means = [float(r.get("model_mean", 0.0)) for r in rows]
+        errs = [float(r.get("model_std", 0.0)) for r in rows]
+        positions = x - total_width / 2 + m_idx * bar_width + bar_width / 2
+        plt.bar(positions, means, width=bar_width, yerr=errs, capsize=3,
+                color=colors[m_idx % len(colors)], label=model_tag, alpha=0.9)
+
+    labels = [_config_label(bool(g1), bool(rec), bool(g2)) for g1, rec, g2 in configs]
+    plt.xticks(x, labels)
+    plt.ylabel("SSIM mean ± std")
+    plt.title("Global SSIM across models and sampling configs")
+    plt.ylim(0, 1)
+    plt.grid(True, axis="y", alpha=0.3, linestyle=":")
+    plt.legend(ncol=max(1, n_models))
+    plt.tight_layout()
+    plt.savefig(os.path.join(results_root, "global_barchart.png"), dpi=300, bbox_inches="tight")
+    plt.close()
 
 
 def sample_with_flags(model: Cond_VAE, y: torch.Tensor, samples: int,
@@ -55,18 +185,21 @@ def sample_with_flags(model: Cond_VAE, y: torch.Tensor, samples: int,
 @torch.no_grad()
 def compute_bicubic_ssim(val_loader, device) -> np.ndarray:
     """Compute and return bicubic SSIM array over the validation set (batch_size=1 expected)."""
-    bicubic = np.zeros(len(val_loader), dtype=np.float32)
-    for i, (y, x) in enumerate(tqdm(val_loader, total=len(val_loader), desc="Bicubic SSIM")):
-        x = x.to(device)
-        y = y.to(device)
-        bicubic_upsampled = F.interpolate(y, scale_factor=2, mode="bicubic")
-        bicubic[i] = ssim(
-            x[0].cpu().numpy(),
-            bicubic_upsampled[0].cpu().numpy(),
+    n = len(val_loader)
+    scores = np.zeros(n, dtype=np.float32)
+    for idx, (lr, hr) in enumerate(
+        tqdm(val_loader, total=n, desc="Bicubic SSIM")
+    ):
+        hr = hr.to(device)
+        lr = lr.to(device)
+        up = F.interpolate(lr, scale_factor=2, mode="bicubic")
+        scores[idx] = skimetrics.structural_similarity(
+            hr[0].cpu().numpy(),
+            up[0].cpu().numpy(),
             data_range=1.0,
             channel_axis=0,
         )
-    return bicubic
+    return scores
 
 
 @torch.no_grad()
@@ -89,21 +222,30 @@ def evaluate_config(model: Cond_VAE, val_loader, device, out_dir: str,
         bicubic_cache = compute_bicubic_ssim(val_loader, device)
 
     # Evaluate over validation set
-    for i, (y, x) in enumerate(tqdm(val_loader, total=len(val_loader), desc=f"Eval g1={int(gamma_first)} rec={int(recurrent)} g2={int(gamma_second)}")):
+    for i, (y, x) in enumerate(
+        tqdm(
+            val_loader,
+            total=len(val_loader),
+            desc=f"Eval g1={int(gamma_first)} rec={int(recurrent)} g2={int(gamma_second)}",
+        )
+    ):
         x = x.to(device)
         y = y.to(device)
-        out = sample_with_flags(model, y, samples=1,
-                                gamma_added_first=gamma_first,
-                                recurrent=recurrent,
-                                gamma_added_second=gamma_second)
+        out = sample_with_flags(
+            model,
+            y,
+            samples=1,
+            gamma_added_first=gamma_first,
+            recurrent=recurrent,
+            gamma_added_second=gamma_second,
+        )
         # out shape: (1, C, H, W)
-        model_ssim[i] = ssim(
+        model_ssim[i] = skimetrics.structural_similarity(
             out[0].cpu().numpy(),
             x[0].cpu().numpy(),
             data_range=1.0,
             channel_axis=0,
         )
-
         # Specific logging for index_to_log
         if i == index_to_log:
             y_i, x_i = y[0].detach(), x[0].detach()
@@ -129,7 +271,9 @@ def evaluate_config(model: Cond_VAE, val_loader, device, out_dir: str,
     # Summary metrics
     metrics = {
         "bicubic_mean": float(bicubic_cache.mean()),
+        "bicubic_std": float(bicubic_cache.std(ddof=0)),
         "model_mean": float(model_ssim.mean()),
+        "model_std": float(model_ssim.std(ddof=0)),
         "improvement": float(model_ssim.mean() - bicubic_cache.mean()),
     }
 
@@ -210,10 +354,28 @@ def evaluate_model_grid(model: Cond_VAE, model_tag: str, val_loader, device,
     # Write CSV summary
     csv_path = os.path.join(base_out_dir, "summary.csv")
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=["gamma_first", "recurrent", "gamma_second", "bicubic_mean", "model_mean", "improvement"])
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "gamma_first",
+                "recurrent",
+                "gamma_second",
+                "bicubic_mean",
+                "bicubic_std",
+                "model_mean",
+                "model_std",
+                "improvement",
+            ],
+        )
         writer.writeheader()
         writer.writerows(summary_rows)
     print(f"Saved summary to {csv_path}")
+
+    # Create per-model barchart
+    try:
+        _plot_per_model_barchart(summary_rows, base_out_dir, model_tag)
+    except (ValueError, RuntimeError, OSError) as e:
+        print(f"Warning: failed to create per-model barchart for {model_tag}: {e}")
 
 
 def parse_args():
@@ -244,6 +406,7 @@ def main():
     os.makedirs(results_root, exist_ok=True)
 
     # Evaluate Laplacian model
+    model_summaries: list[tuple[str, str]] = []
     if args.laplacian_ckpt is not None and os.path.exists(args.laplacian_ckpt):
         lap_model = load_model(
             args.laplacian_ckpt, distribution_type="laplacian", device=device,
@@ -253,6 +416,7 @@ def main():
         lap_out_dir = os.path.join(results_root, lap_tag)
         os.makedirs(lap_out_dir, exist_ok=True)
         evaluate_model_grid(lap_model, lap_tag, val_loader, device, lap_out_dir, args.index_to_log, bicubic_cache)
+        model_summaries.append((lap_tag, lap_out_dir))
     else:
         print("No Laplacian checkpoint provided or path not found; skipping Laplacian model.")
 
@@ -267,8 +431,16 @@ def main():
             gau_out_dir = os.path.join(results_root, gau_tag)
             os.makedirs(gau_out_dir, exist_ok=True)
             evaluate_model_grid(gau_model, gau_tag, val_loader, device, gau_out_dir, args.index_to_log, bicubic_cache)
+            model_summaries.append((gau_tag, gau_out_dir))
         else:
             print(f"Gaussian checkpoint not found: {args.gaussian_ckpt}. Skipping Gaussian model.")
+
+    # Global barchart across models/configs
+    try:
+        _plot_global_barchart(results_root, model_summaries)
+        print(f"Saved global barchart to {os.path.join(results_root, 'global_barchart.png')}")
+    except (ValueError, RuntimeError, OSError) as e:
+        print(f"Warning: failed to create global barchart: {e}")
 
     print("All evaluations complete.")
 
