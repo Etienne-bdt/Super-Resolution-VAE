@@ -1,5 +1,6 @@
 import argparse
 import csv
+import importlib as py_importlib
 import importlib.util as importlib_util
 import json
 import os
@@ -107,8 +108,8 @@ def _plot_per_model_barchart_lpips(summary_rows: list[dict], out_dir: str, model
 
 
 def _plot_per_model_barchart_mmse(summary_rows: list[dict], out_dir: str, model_tag: str, metric: str = "ssim") -> None:
-    """Create a per-model bar chart for MMSE using the given metric ('ssim' or 'lpips')."""
-    assert metric in {"ssim", "lpips"}
+    """Create a per-model bar chart for MMSE using the given metric ('ssim', 'lpips' or 'psnr')."""
+    assert metric in {"ssim", "lpips", "psnr"}
     summary_rows_sorted = sorted(
         summary_rows,
         key=lambda r: (r["gamma_first"], r["recurrent"], r["gamma_second"])  # type: ignore[index]
@@ -125,7 +126,7 @@ def _plot_per_model_barchart_mmse(summary_rows: list[dict], out_dir: str, model_
         ylabel = "MMSE SSIM mean ± std"
         title = f"{model_tag}: MMSE SSIM across sampling configs"
         color = "#5DA5DA"
-    else:
+    elif metric == "lpips":
         means = [float(r.get("mmse_lpips_mean", 0.0)) for r in summary_rows_sorted]
         errs = [float(r.get("mmse_lpips_std", 0.0)) for r in summary_rows_sorted]
         ref_mean = float(summary_rows_sorted[0].get("bicubic_lpips_mean", 0.0)) if summary_rows_sorted else 0.0
@@ -133,14 +134,24 @@ def _plot_per_model_barchart_mmse(summary_rows: list[dict], out_dir: str, model_
         ylabel = "MMSE LPIPS mean ± std (lower is better)"
         title = f"{model_tag}: MMSE LPIPS across sampling configs"
         color = "#60BD68"
+    else:
+        means = [float(r.get("mmse_psnr_mean", 0.0)) for r in summary_rows_sorted]
+        errs = [float(r.get("mmse_psnr_std", 0.0)) for r in summary_rows_sorted]
+        ref_mean = float(summary_rows_sorted[0].get("bicubic_psnr_mean", 0.0)) if summary_rows_sorted else 0.0
+        ref_std = float(summary_rows_sorted[0].get("bicubic_psnr_std", 0.0)) if summary_rows_sorted else 0.0
+        ylabel = "MMSE PSNR (dB) mean ± std (higher is better)"
+        title = f"{model_tag}: MMSE PSNR across sampling configs"
+        color = "#FAA43A"
 
     plt.figure(figsize=(12, 6))
     x = np.arange(len(labels))
     plt.bar(x, means, yerr=errs, capsize=4, color=color, alpha=0.9)
     if metric == "ssim":
         plt.axhline(ref_mean, color="#F17CB0", linestyle="--", label=f"Bicubic SSIM = {ref_mean:.4f}")
-    else:
+    elif metric == "lpips":
         plt.axhline(ref_mean, color="#F17CB0", linestyle="--", label=f"Bicubic LPIPS = {ref_mean:.4f}")
+    else:
+        plt.axhline(ref_mean, color="#F17CB0", linestyle="--", label=f"Bicubic PSNR = {ref_mean:.2f} dB")
     if ref_std > 0:
         plt.fill_between(
             [x[0] - 0.6, x[-1] + 0.6],
@@ -156,8 +167,47 @@ def _plot_per_model_barchart_mmse(summary_rows: list[dict], out_dir: str, model_
     plt.grid(True, axis="y", alpha=0.3, linestyle=":")
     plt.legend()
     plt.tight_layout()
-    suffix = "mmse_ssim" if metric == "ssim" else "mmse_lpips"
+    suffix = "mmse_ssim" if metric == "ssim" else ("mmse_lpips" if metric == "lpips" else "mmse_psnr")
     plt.savefig(os.path.join(out_dir, f"barchart_{suffix}.png"), dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def _plot_per_model_barchart_psnr(summary_rows: list[dict], out_dir: str, model_tag: str) -> None:
+    """Create a per-model bar chart for PSNR (higher is better)."""
+    summary_rows_sorted = sorted(
+        summary_rows,
+        key=lambda r: (r["gamma_first"], r["recurrent"], r["gamma_second"])  # type: ignore[index]
+    )
+    labels = [
+        _config_label(bool(r["gamma_first"]), bool(r["recurrent"]), bool(r["gamma_second"]))  # type: ignore[index]
+        for r in summary_rows_sorted
+    ]
+    means = [float(r.get("model_psnr_mean", 0.0)) for r in summary_rows_sorted]
+    errs = [float(r.get("model_psnr_std", 0.0)) for r in summary_rows_sorted]
+
+    bicubic_mean = float(summary_rows_sorted[0].get("bicubic_psnr_mean", 0.0)) if summary_rows_sorted else 0.0
+    bicubic_std = float(summary_rows_sorted[0].get("bicubic_psnr_std", 0.0)) if summary_rows_sorted else 0.0
+
+    plt.figure(figsize=(12, 6))
+    x = np.arange(len(labels))
+    plt.bar(x, means, yerr=errs, capsize=4, color="#FAA43A", alpha=0.9)
+    plt.axhline(bicubic_mean, color="#F17CB0", linestyle="--", label=f"Bicubic PSNR = {bicubic_mean:.2f} dB")
+    if bicubic_std > 0:
+        plt.fill_between(
+            [x[0] - 0.6, x[-1] + 0.6],
+            [bicubic_mean - bicubic_std, bicubic_mean - bicubic_std],
+            [bicubic_mean + bicubic_std, bicubic_mean + bicubic_std],
+            color="#F17CB0",
+            alpha=0.12,
+            label="Bicubic ±1σ",
+        )
+    plt.xticks(x, labels, rotation=0)
+    plt.ylabel("PSNR (dB) mean ± std")
+    plt.title(f"{model_tag}: PSNR across sampling configs")
+    plt.grid(True, axis="y", alpha=0.3, linestyle=":")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_dir, "barchart_psnr.png"), dpi=300, bbox_inches="tight")
     plt.close()
 
 
@@ -316,20 +366,26 @@ def evaluate_config(model: Cond_VAE, val_loader, device, out_dir: str,
     model.to(device)
 
     model_ssim = np.zeros(len(val_loader), dtype=np.float32)
+    model_psnr = np.zeros(len(val_loader), dtype=np.float32)
     # Use provided bicubic cache or compute on the fly (first run should pass cache)
     if bicubic_cache is None:
         bicubic_cache = compute_bicubic_ssim(val_loader, device)
 
     # Prepare LPIPS loss (AlexNet backbone) as optional
     lpips_fn = None
-    if importlib_util.find_spec("lpips") is not None:  # runtime optional dependency
-        from lpips import LPIPS  # type: ignore
-
-        lpips_fn = LPIPS(net="alex").to(device)
-        lpips_fn.eval()
+    lpips_spec = importlib_util.find_spec("lpips")
+    if lpips_spec is not None:
+        try:
+            lpips_module = py_importlib.import_module("lpips")
+            LPIPS = lpips_module.LPIPS
+            lpips_fn = LPIPS(net="alex").to(device)
+            lpips_fn.eval()
+        except Exception:
+            lpips_fn = None
 
     # Containers for metrics
     mmse_ssim = np.zeros(len(val_loader), dtype=np.float32)
+    mmse_psnr = np.zeros(len(val_loader), dtype=np.float32)
     # LPIPS arrays (only if available)
     bicubic_lp = np.zeros(len(val_loader), dtype=np.float32)
     model_lp = np.zeros(len(val_loader), dtype=np.float32)
@@ -360,6 +416,11 @@ def evaluate_config(model: Cond_VAE, val_loader, device, out_dir: str,
             data_range=1.0,
             channel_axis=0,
         )
+        model_psnr[i] = float(
+            skimetrics.peak_signal_noise_ratio(
+                x[0].cpu().numpy(), out[0].cpu().numpy(), data_range=1.0
+            )
+        )
 
         # MMSE via multiple samples
         samples = sample_with_flags(
@@ -376,6 +437,11 @@ def evaluate_config(model: Cond_VAE, val_loader, device, out_dir: str,
             x[0].cpu().numpy(),
             data_range=1.0,
             channel_axis=0,
+        )
+        mmse_psnr[i] = float(
+            skimetrics.peak_signal_noise_ratio(
+                x[0].cpu().numpy(), mmse_img[0].cpu().numpy(), data_range=1.0
+            )
         )
 
         # LPIPS computations (use bands [2,1,0] and range [-1,1])
@@ -415,6 +481,18 @@ def evaluate_config(model: Cond_VAE, val_loader, device, out_dir: str,
             save_img_histogram(out_i, os.path.join(out_dir, f"idx{index_to_log}_model_histogram.png"))
             save_img_histogram(mmse_img[0].detach(), os.path.join(out_dir, f"idx{index_to_log}_mmse_histogram.png"))
 
+    # Compute bicubic PSNR once for reference
+    bicubic_psnr = np.zeros(len(val_loader), dtype=np.float32)
+    for j, (yy, xx) in enumerate(val_loader):
+        xx = xx.to(device)
+        yy = yy.to(device)
+        up = F.interpolate(yy, scale_factor=2, mode="bicubic")
+        bicubic_psnr[j] = float(
+            skimetrics.peak_signal_noise_ratio(
+                xx[0].cpu().numpy(), up[0].cpu().numpy(), data_range=1.0
+            )
+        )
+
     # Summary metrics
     metrics = {
         # SSIM
@@ -425,6 +503,13 @@ def evaluate_config(model: Cond_VAE, val_loader, device, out_dir: str,
         "mmse_ssim_mean": float(mmse_ssim.mean()),
         "mmse_ssim_std": float(mmse_ssim.std(ddof=0)),
         "improvement": float(model_ssim.mean() - bicubic_cache.mean()),
+        # PSNR (dB)
+        "bicubic_psnr_mean": float(bicubic_psnr.mean()),
+        "bicubic_psnr_std": float(bicubic_psnr.std(ddof=0)),
+        "model_psnr_mean": float(model_psnr.mean()),
+        "model_psnr_std": float(model_psnr.std(ddof=0)),
+    "mmse_psnr_mean": float(mmse_psnr.mean()),
+    "mmse_psnr_std": float(mmse_psnr.std(ddof=0)),
     }
     # Conditionally add LPIPS metrics
     if lpips_fn is not None:
@@ -450,6 +535,22 @@ def evaluate_config(model: Cond_VAE, val_loader, device, out_dir: str,
     plt.grid(True, alpha=0.3)
     plt.xlim(0, 1)
     plt.savefig(os.path.join(out_dir, "ssim_histogram.png"), dpi=300, bbox_inches="tight")
+    plt.close()
+
+    # Save histogram for the PSNR distributions (dB)
+    plt.figure(figsize=(10, 6))
+    min_psnr = float(min(bicubic_psnr.min(), model_psnr.min(), mmse_psnr.min()))
+    max_psnr = float(max(bicubic_psnr.max(), model_psnr.max(), mmse_psnr.max()))
+    psnr_bins = np.linspace(max(10.0, min_psnr), max(50.0, max_psnr), 100)
+    plt.hist(bicubic_psnr, bins=psnr_bins, alpha=0.7, label="Bicubic PSNR", color="#7A68A6", density=True)
+    plt.hist(model_psnr, bins=psnr_bins, alpha=0.7, label="Model PSNR", color="#FAA43A", density=True)
+    plt.hist(mmse_psnr, bins=psnr_bins, alpha=0.7, label="MMSE PSNR", color="#60BD68", density=True)
+    plt.xlabel("PSNR (dB)")
+    plt.ylabel("Density")
+    plt.title("Distribution of PSNR: Bicubic vs Model vs MMSE")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.savefig(os.path.join(out_dir, "psnr_histogram.png"), dpi=300, bbox_inches="tight")
     plt.close()
 
     # Save histogram for LPIPS distributions (lower is better) only if computed
@@ -543,12 +644,18 @@ def evaluate_model_grid(model: Cond_VAE, model_tag: str, val_loader, device,
                 "mmse_ssim_mean",
                 "mmse_ssim_std",
                 "improvement",
+                "bicubic_psnr_mean",
+                "bicubic_psnr_std",
+                "model_psnr_mean",
+                "model_psnr_std",
                 "bicubic_lpips_mean",
                 "bicubic_lpips_std",
                 "model_lpips_mean",
                 "model_lpips_std",
                 "mmse_lpips_mean",
                 "mmse_lpips_std",
+                "mmse_psnr_mean",
+                "mmse_psnr_std",
             ],
         )
         writer.writeheader()
@@ -565,10 +672,16 @@ def evaluate_model_grid(model: Cond_VAE, model_tag: str, val_loader, device,
         _plot_per_model_barchart_lpips(summary_rows, base_out_dir, model_tag)
     except (ValueError, RuntimeError, OSError) as e:
         print(f"Warning: failed to create per-model LPIPS barchart for {model_tag}: {e}")
+    # Create PSNR barchart
+    try:
+        _plot_per_model_barchart_psnr(summary_rows, base_out_dir, model_tag)
+    except (ValueError, RuntimeError, OSError) as e:
+        print(f"Warning: failed to create per-model PSNR barchart for {model_tag}: {e}")
     # Create MMSE barcharts
     try:
         _plot_per_model_barchart_mmse(summary_rows, base_out_dir, model_tag, metric="ssim")
         _plot_per_model_barchart_mmse(summary_rows, base_out_dir, model_tag, metric="lpips")
+        _plot_per_model_barchart_mmse(summary_rows, base_out_dir, model_tag, metric="psnr")
     except (ValueError, RuntimeError, OSError) as e:
         print(f"Warning: failed to create per-model MMSE barcharts for {model_tag}: {e}")
 
