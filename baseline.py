@@ -40,16 +40,16 @@ def sample_with_flags(model: Cond_VAE, y: torch.Tensor, samples: int,
         mean_decode = model.decode(z, y_exp)
 
         if recurrent:
-            x_hat = model.sample_from_distribution(mean_decode, gamma, gamma_added_first)
+            x_hat = model.sample_from_distribution(mean_decode, gamma, gamma_added_first).clamp(0, 1)
             # Recurrent pass through the full model
             x_hat, *_ = model.forward(x_hat, y_exp)
             # Optional second noise application
             x_hat = model.sample_from_distribution(x_hat, gamma, gamma_added_second)
-            return x_hat
+            return x_hat.clamp(0,1)
         else:
             # No recurrent pass, just decide whether to add first noise or not
             x_hat = model.sample_from_distribution(mean_decode, gamma, gamma_added_first)
-            return x_hat
+            return x_hat.clamp(0,1)
 
 
 @torch.no_grad()
@@ -135,7 +135,7 @@ def evaluate_config(model: Cond_VAE, val_loader, device, out_dir: str,
 
     # Save histogram for the SSIM distributions
     plt.figure(figsize=(10, 6))
-    bin_edges = np.linspace(0.0, 1.0, 31)  # fixed bins across runs
+    bin_edges = np.linspace(0.5, 1.0, 100)  # fixed bins across runs
     plt.hist(bicubic_cache, bins=bin_edges, alpha=0.7, label="Bicubic SSIM", color="blue", density=True)
     plt.hist(model_ssim, bins=bin_edges, alpha=0.7, label="Model SSIM", color="red", density=True)
     plt.xlabel("SSIM Score")
