@@ -45,7 +45,7 @@ class Cond_VAE(BaseVAE):
         super(Cond_VAE, self).__init__(patch_size, callbacks, slurm_job_id)
         self.cr = cr
         self.L: int = L  # Number of samples to draw from the latent space
-        self.adjust = cr / 4  # Ensure latent size is a multiple of 4
+        self.adjust = cr  # Ensure latent size is a multiple of 4
         self.patch_size = patch_size
         self.gamma_type = gamma_type
         self.distribution_type = distribution_type  # "laplacian" or "gaussian"

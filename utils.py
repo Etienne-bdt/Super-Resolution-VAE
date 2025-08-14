@@ -5,7 +5,7 @@ import torch
 import torch.nn.functional as F
 
 
-def normalize_image(image: torch.Tensor, quantile: float = 0.99) -> torch.Tensor:
+def normalize_image(image: torch.Tensor, quantile: float = 1) -> torch.Tensor:
     """
     Normalize the image tensor to the range [0, 1] for visualization.
     Args:
