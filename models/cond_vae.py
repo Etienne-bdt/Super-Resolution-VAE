@@ -495,7 +495,7 @@ class Cond_VAE(BaseVAE):
             x = x.to(device)
             y = y.to(device)
             with torch.no_grad():
-                x_hat = self.sample(y, y.shape[0], gamma_added=True)
+                x_hat = self.sample(y, 100, gamma_added=False, recurrent=False)
                 imgs_in = y[:4]
                 imgs_out = x_hat[:4]
 
