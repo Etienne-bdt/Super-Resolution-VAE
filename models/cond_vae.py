@@ -337,8 +337,7 @@ class Cond_VAE(BaseVAE):
         first = epoch == 1
         if full_val:
             total_pixels = 0
-            total_ssim_recurrent = 0.0
-            total_ssim_no_recurrent = 0.0
+            total_ssim_pred = 0.0
             total_ssim_reconstruction = 0.0
             total_lpips = 0.0
             first_batch = True
@@ -348,9 +347,9 @@ class Cond_VAE(BaseVAE):
                 x, y = x.to(device), y.to(device)
                 with torch.no_grad():
                     # Sample with recurrent=True (default behavior)
-                    x_hat_recurrent = self.sample(y, y.shape[0], gamma_added=True, recurrent=True)
-                    # Sample with recurrent=False
-                    x_hat_no_recurrent = self.sample(y, y.shape[0], gamma_added=True, recurrent=False)
+                    x_hat = self.sample(y, 100, gamma_added=False, recurrent=False)
+                    if x_hat.ndim == 5:
+                        x_hat = x_hat.mean(dim=0)
                     # Direct reconstruction from forward pass
                     x_hat_reconstruction, _, _, _ = self.forward(x, y)
                 
@@ -358,24 +357,15 @@ class Cond_VAE(BaseVAE):
                 total_pixels += b
 
                 # per-sample metrics
-                for orig, recon_rec, recon_no_rec, recon_direct in zip(x, x_hat_recurrent, x_hat_no_recurrent, x_hat_reconstruction):
+                for orig, pred, recon_direct in zip(x, x_hat, x_hat_reconstruction):
                     # SSIM with recurrent sampling
-                    ssim_recurrent = self.ssim(
+                    ssim_pred = self.ssim(
                         orig.cpu().numpy(),
-                        recon_rec.cpu().numpy(),
+                        pred.cpu().numpy(),
                         data_range=1.0,
                         channel_axis=0,
                     )
-                    total_ssim_recurrent += ssim_recurrent
-                    
-                    # SSIM without recurrent sampling
-                    ssim_no_recurrent = self.ssim(
-                        orig.cpu().numpy(),
-                        recon_no_rec.cpu().numpy(),
-                        data_range=1.0,
-                        channel_axis=0,
-                    )
-                    total_ssim_no_recurrent += ssim_no_recurrent
+                    total_ssim_pred += ssim_pred
                     
                     # SSIM for direct reconstruction
                     ssim_reconstruction = self.ssim(
@@ -388,11 +378,9 @@ class Cond_VAE(BaseVAE):
                     
                     # LPIPS using recurrent reconstruction
                     total_lpips += self.lpips_fn(
-                        orig[[2, 1, 0]].unsqueeze(0), recon_rec[[2, 1, 0]].unsqueeze(0)
+                        orig[[2, 1, 0]].unsqueeze(0), pred[[2, 1, 0]].unsqueeze(0)
                     ).item()
 
-                # For backward compatibility, use recurrent sampling for image logging
-                x_hat = x_hat_recurrent
 
                 # capture first batch for image logging
                 if first_batch:
@@ -486,20 +474,17 @@ class Cond_VAE(BaseVAE):
                     first_batch = False
 
             # compute averages
-            avg_ssim_recurrent = total_ssim_recurrent / total_pixels
-            avg_ssim_no_recurrent = total_ssim_no_recurrent / total_pixels
+            avg_ssim_pred = total_ssim_pred / total_pixels
             avg_ssim_reconstruction = total_ssim_reconstruction / total_pixels
             avg_lpips = total_lpips / total_pixels
 
             # log aggregate metrics
             wandb_run.log(
                 {
-                    "Metrics/SSIM_Recurrent": avg_ssim_recurrent,
-                    "Metrics/SSIM_No_Recurrent": avg_ssim_no_recurrent,
                     "Metrics/SSIM_Reconstruction": avg_ssim_reconstruction,
                     "Metrics/LPIPS": avg_lpips,
                     # Keep original SSIM for backward compatibility
-                    "Metrics/SSIM": avg_ssim_recurrent,
+                    "Metrics/SSIM": avg_ssim_pred,
                 },
                 step=epoch,
             )
@@ -601,35 +586,52 @@ class Cond_VAE(BaseVAE):
         y = y[2:3, :, :, :]
         return y, x
 
-    def sample(self, y, samples=100, gamma_added=True, recurrent=True):
+    def sample(self, y, samples=100, gamma_added=True, recurrent=False):
         """
-        Generate samples from the VAE given a condition y.
-        Args:
-            y (torch.Tensor): Condition tensor of shape (batch_size, latent_size).
-            samples (int): Number of samples to generate.
-        Returns:
-            torch.Tensor: Generated samples of shape (num_samples, 4, patch_size, patch_size).
+        Draw samples p(x|y).
+        Returns tensor shape (samples, batch, 4, patch_size, patch_size).
         """
-        mu, logvar = self.cond_prior(y).chunk(2, dim=1)  # Split into mu and logvar
-        mu, logvar = self.conv_condmu(mu), self.conv_condlogvar(logvar)
-        _, _, h, w = y.shape
-        z = torch.randn(
-            samples, int(int(256 / (self.adjust * 2)) * 2 * h * w / 64), device=y.device
-        )
-        z = mu + torch.exp(0.5 * logvar) * z
-        self.gamma = self.decoder_variance(z)
-        if y.shape[0] == 1:
-            y = y.expand(samples, -1, -1, -1)  # Expand x to match samples
-        mean_decode = self.decode(z, y)
+        device = y.device
+        B = y.size(0)
 
+        # Conditional prior
+        mu_c, logvar_c = self.cond_prior(y).chunk(2, dim=1)
+        mu_c, logvar_c = self.conv_condmu(mu_c), self.conv_condlogvar(logvar_c)   # (B, latent_dim)
+        latent_dim = mu_c.size(1)
+
+        # Sample z ~ N(mu_c, sigma_c)
+        z = torch.randn(samples, B, latent_dim, device=device)
+        z = mu_c.unsqueeze(0) + torch.exp(0.5 * logvar_c).unsqueeze(0) * z        # (S,B,D)
+
+        # Flatten batch for decode
+        z_flat = z.reshape(samples * B, latent_dim)
+        y_rep = y.unsqueeze(0).expand(samples, -1, -1, -1, -1).reshape(samples * B, *y.shape[1:])
+
+        mean = self.decode(z_flat, y_rep)  # (S*B, 4, H, W)
+        mean = mean.view(samples, B, 4, self.patch_size, self.patch_size)
+
+        # Gamma (do NOT overwrite self.gamma param for scalar case)
+
+        if gamma_added:
+            if self.gamma_type == "scalar":
+                gamma = self.gamma
+            else:
+                g = self.decoder_variance(z_flat)  # (S*B, 4, H, W)
+                gamma = g.view(samples, B, 4, self.patch_size, self.patch_size)
+            mean_or_sample = self.sample_from_distribution(mean, gamma, gamma_added=True)
+        else:
+            mean_or_sample = mean
 
         if recurrent:
-            x_hat = self.sample_from_distribution(mean_decode, self.gamma, gamma_added)
-            x_hat, *_ = self.forward(x_hat, y)
-            x_hat = self.sample_from_distribution(x_hat, self.gamma, gamma_added=False)
-            return x_hat
-        else:
-            return mean_decode
+            # One refinement pass: treat each sample independently
+            refined = []
+            for s in range(samples):
+                x_in = mean_or_sample[s]            # (B,4,H,W)
+                x_ref, _, _, _ = self.forward(x_in, y, L=1)  # (B,4,H,W)
+                refined.append(x_ref)
+            mean_or_sample = torch.stack(refined, dim=0)
+
+        return mean_or_sample
 
 if __name__ == "__main__":
     model = Cond_VAE(cr=1.5, patch_size=64, distribution_type="laplacian")
