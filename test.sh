@@ -17,4 +17,4 @@ source .venv/bin/activate
 
 export SCRATCH="/scratch/disc/e.bardet/"
 
-python train.py --patch_size 256 --batch_size 16 --test --pre_epochs 0 --val_metrics_every 20 --epochs 0 -cr 1.5 --model_type Cond_VAE --model_ckpt ./ckpt/3871424.pth --distribution_type gaussian
+python train.py --patch_size 256 --batch_size 16 --test --pre_epochs 0 --val_metrics_every 20 --epochs 0 -cr 1.5 --model_type Cond_VAE --model_ckpt ./ckpt/3872913.pth --distribution_type gaussian --gamma_type vector

@@ -312,7 +312,11 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
         pred, target = self.get_task_data(val_loader)
 
         with torch.no_grad():
-            samples = self.sample(pred, gamma_added=False, recurrent=False)
+            samples = self.sample(pred, gamma_added=True, recurrent=False)[
+                :, 0, :, :, :
+            ]
+            if not hasattr(self, "gamma"):
+                _, _, _, self.gamma = self.forward(target, pred)
             if self.gamma_type == "scalar":
                 gamma = self.gamma
             else:
@@ -413,8 +417,8 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
         plt.imsave(f"{results_dir}/xor_mean_bias_std.png", xor, cmap="viridis")
 
         SSIM_MMSE = self.ssim(
-            mean[[2, 1, 0], :, :].cpu().numpy(),
-            target[0, [2, 1, 0], :, :].cpu().numpy(),
+            mean[:, :, :].cpu().numpy(),
+            target[0, :, :, :].cpu().numpy(),
             data_range=1.0,
             multichannel=True,
             channel_axis=0,
@@ -422,8 +426,8 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
         print(f"SSIM MMSE: {SSIM_MMSE:.4f}")
 
         SSIM_samples = self.ssim(
-            samples[0, [2, 1, 0], :, :].cpu().numpy(),
-            target[0, [2, 1, 0], :, :].cpu().numpy(),
+            samples[0, :, :, :].cpu().numpy(),
+            target[0, :, :, :].cpu().numpy(),
             data_range=1.0,
             multichannel=True,
             channel_axis=0,
@@ -431,8 +435,8 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
         print(f"SSIM Samples: {SSIM_samples:.4f}")
 
         SSIM_bicubic = self.ssim(
-            pred_bicubic[0, [2, 1, 0], :, :].cpu().numpy(),
-            target[0, [2, 1, 0], :, :].cpu().numpy(),
+            pred_bicubic[0, :, :, :].cpu().numpy(),
+            target[0, :, :, :].cpu().numpy(),
             data_range=1.0,
             multichannel=True,
             channel_axis=0,

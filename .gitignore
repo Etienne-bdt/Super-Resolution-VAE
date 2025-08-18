@@ -19,3 +19,4 @@ floods/
 results/*/*/wandb/
 wandb/*
 *.egg-info/*
+results/*
