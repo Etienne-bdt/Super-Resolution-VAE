@@ -27,8 +27,8 @@ class Multimodal_VAE(BaseVAE):
             callbacks = []
         super(Multimodal_VAE, self).__init__(patch_size, callbacks, slurm_job_id)
         self.cr = cr
-        self.adjustx = 4 * self.cr
-        self.adjusty = 8 * self.cr
+        self.adjustx = self.cr
+        self.adjusty = 2 * self.cr
         self.patch_size = patch_size
         self.L = L
         self.gamma_type = gamma_type
@@ -42,8 +42,8 @@ class Multimodal_VAE(BaseVAE):
                     1,
                     (
                         int(256 / (2 * self.adjustx)) * 2,
-                        patch_size // 2**3,
-                        patch_size // 2**3,
+                        patch_size // 2**4,
+                        patch_size // 2**4,
                     ),
                 ),
                 up_block(
@@ -72,8 +72,8 @@ class Multimodal_VAE(BaseVAE):
                     1,
                     (
                         int(256 / (2 * self.adjusty)) * 2,
-                        patch_size // 2**3,
-                        patch_size // 2**3,
+                        patch_size // 2**4,
+                        patch_size // 2**4,
                     ),
                 ),
                 up_block(
@@ -84,7 +84,7 @@ class Multimodal_VAE(BaseVAE):
                     in_channels=256,
                     out_channels=128,
                 ),
-                conv_block(128, 64, 3, 1, 1),
+                up_block(128, 64),
                 conv_block(64, 32, 1, 1, 0),
                 conv_block(32, 16, 1, 1, 0),
                 conv_block(
@@ -96,7 +96,7 @@ class Multimodal_VAE(BaseVAE):
         self.encoder_y = nn.Sequential(
             down_block(in_channels=4, out_channels=16),  # out 16,
             down_block(in_channels=16, out_channels=64),  # out 64, 16, 16
-            conv_block(64, 128, 3, 1, 1),
+            down_block(64, 128),
             conv_block(128, 256, 3, 1, 1),
             conv_block(
                 256,
@@ -115,8 +115,8 @@ class Multimodal_VAE(BaseVAE):
                 1,
                 (
                     int(256 / (2 * self.adjusty)) * 2,
-                    patch_size // 2**3,
-                    patch_size // 2**3,
+                    patch_size // 2**4,
+                    patch_size // 2**4,
                 ),
             ),
             up_block(
@@ -127,7 +127,7 @@ class Multimodal_VAE(BaseVAE):
                 in_channels=256,
                 out_channels=128,
             ),
-            conv_block(128, 64, 3, 1, 1),
+            up_block(128, 64),
             conv_block(64, 32, 1, 1, 0),
             conv_block(32, 16, 1, 1, 0),
             conv_block(
@@ -141,7 +141,7 @@ class Multimodal_VAE(BaseVAE):
         self.encoder_x = nn.Sequential(
             down_block(in_channels=20, out_channels=64),  # out 64, 8, 8
             down_block(64, 128),
-            conv_block(128, 256, 3, 1, 1),
+            down_block(128, 256),
             conv_block(
                 256,
                 int(256 / (2 * self.adjustx)) * 2,
@@ -159,24 +159,24 @@ class Multimodal_VAE(BaseVAE):
                 1,
                 (
                     int(256 / (2 * self.adjustx)) * 4,
-                    patch_size // 2**3,
-                    patch_size // 2**3,
+                    patch_size // 2**4,
+                    patch_size // 2**4,
                 ),
             ),
             up_block(
                 in_channels=int(256 / (2 * self.adjustx)) * 4,
-                out_channels=256,
+                out_channels=512,
             ),
             up_block(
-                in_channels=256,
-                out_channels=128,
+                in_channels=512,
+                out_channels=256,
             ),
-            conv_block(128, 64, 3, 1, 1),
+            up_block(256, 128),
+            conv_block(128, 64, 1, 1, 0),
             conv_block(64, 32, 1, 1, 0),
-            conv_block(32, 16, 1, 1, 0),
         )
         self.decoder_end = nn.Sequential(
-            up_block(in_channels=20, out_channels=16),  # upsample to 8x8
+            up_block(in_channels=36, out_channels=16),  # upsample to 8x8
             conv_block(16, 8, 3, 1, 1),
             conv_block(8, 8, 1, 1, 0),
             conv_block(
@@ -204,7 +204,7 @@ class Multimodal_VAE(BaseVAE):
         self.y_to_z = nn.Sequential(
             down_block(in_channels=4, out_channels=16),
             down_block(in_channels=16, out_channels=64),
-            conv_block(64, 128, 3, 1, 1),
+            down_block(64, 128),
             conv_block(128, int(256 / (2 * self.adjustx)) * 2, 3, 1, 1),
             # Flatten to (batch_size, latent_size // 3)
             # out 8192
@@ -215,8 +215,8 @@ class Multimodal_VAE(BaseVAE):
                 1,
                 (
                     int(256 / (2 * self.adjusty)) * 2,
-                    self.patch_size // 2**3,
-                    self.patch_size // 2**3,
+                    self.patch_size // 2**4,
+                    self.patch_size // 2**4,
                 ),
             ),
             conv_block(
@@ -241,8 +241,8 @@ class Multimodal_VAE(BaseVAE):
                 1,
                 (
                     int(256 / (2 * self.adjustx)) * 4,
-                    self.patch_size // 2**3,
-                    self.patch_size // 2**3,
+                    self.patch_size // 2**4,
+                    self.patch_size // 2**4,
                 ),
             ),
             conv_block(

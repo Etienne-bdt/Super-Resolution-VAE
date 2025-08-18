@@ -1055,9 +1055,9 @@ def evaluate_model_grid(
     Run the full 2x2x2 grid for a given model and save a CSV summary.
     """
     combos = []
-    for g1 in [False, True]:
-        for rec in [False, True]:
-            for g2 in [False, True]:
+    for g1 in [True]:
+        for rec in [False]:
+            for g2 in [False]:
                 if not rec and g2:
                     pass
                 else:
@@ -1166,7 +1166,7 @@ def parse_args():
     parser.add_argument(
         "--gaussian_ckpt",
         type=str,
-        default="ckpt/3872912.pth",
+        default="ckpt/3872913.pth",
         help="Path to Gaussian model checkpoint (optional)",
     )
     parser.add_argument("--patch_size", type=int, default=256)
@@ -1231,7 +1231,7 @@ def main():
                 device=device,
                 cr=args.cr,
                 patch_size=args.patch_size,
-                gamma_type="scalar",
+                gamma_type="vector",
             )
             gau_tag = f"Gaussian-{os.path.basename(args.gaussian_ckpt).split('.')[0]}"
             gau_out_dir = os.path.join(results_root, gau_tag)
