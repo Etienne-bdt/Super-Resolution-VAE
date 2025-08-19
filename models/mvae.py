@@ -1,4 +1,3 @@
-import math
 import os
 
 import torch
@@ -28,13 +27,14 @@ class Multimodal_VAE(BaseVAE):
         super(Multimodal_VAE, self).__init__(patch_size, callbacks, slurm_job_id)
         self.cr = cr
         self.adjustx = self.cr
-        self.adjusty = 2 * self.cr
+        self.adjusty = 4 * self.cr
         self.patch_size = patch_size
         self.L = L
         self.gamma_type = gamma_type
+        self.distribution_type = "gaussian"
         if gamma_type == "scalar":
-            self.gammax = torch.tensor(1.0, requires_grad=True)
-            self.gammay = torch.tensor(1.0, requires_grad=True)
+            self.gammax = nn.Parameter(torch.tensor(1.0, dtype=torch.float32))
+            self.gammay = nn.Parameter(torch.tensor(1.0, dtype=torch.float32))
         else:
             # Add variance decoder for x (HR output)
             self.variance_decoder_x = nn.Sequential(
@@ -58,7 +58,7 @@ class Multimodal_VAE(BaseVAE):
                     in_channels=128,
                     out_channels=64,
                 ),
-                conv_block(64, 32, 3, 1, 1),
+                up_block(64, 32),
                 conv_block(32, 16, 1, 1, 0),
                 conv_block(16, 8, 1, 1, 0),
                 conv_block(
@@ -374,91 +374,46 @@ class Multimodal_VAE(BaseVAE):
         x_hat = self.decode_x(z, y_original, u)
         return x_hat
 
-    def sample(self, y, samples=10000) -> torch.Tensor:
-        # Generate samples from the model with GPU memory management
-        samples_u = samples_z = int(math.sqrt(samples))
+    def sample(self, y, samples=100, gamma_added=True, recurrent=False):
+        # Generate a sample from the model
+        y_original = y
+        B, c, h, w = y.size()
         mu_u, logvar_u = self.encode_y(y)
+        u = self.reparameterize(mu_u, logvar_u)
 
-        # Determine batch size for GPU processing (10% of total or less)
-        max_gpu_samples = max(1, samples // 200)
-        batch_size = min(max_gpu_samples, samples_u)
-        print(f"Using batch size: {batch_size} for sampling.")
+        y = self.y_to_z(y).view(y.size(0), -1)
+        u = self.u_to_z(u).view(u.size(0), -1)
+
+        mu_z_uy, logvar_z_uy = self.z_cond(y, u)
+
+        latent_dim = mu_z_uy.size(1)
         device = y.device
-        use_cpu_offload = samples > 5000
-        cpu_device = torch.device("cpu") if use_cpu_offload else device
+        z = torch.randn(samples, B, latent_dim, device=device)
+        z = mu_z_uy.unsqueeze(0) + z * torch.exp(0.5 * logvar_z_uy.unsqueeze(0))
 
-        # Store results on CPU to save GPU memory only if samples > 5000
-        all_outputs = []
+        z_flat = z.reshape(samples * B, latent_dim)
+        u_rep = u.expand(samples, -1, -1).reshape(samples * B, -1)
 
-        # Process in batches
-        for batch_start in range(0, samples_u, batch_size):
-            batch_end = min(batch_start + batch_size, samples_u)
-            current_batch_size = batch_end - batch_start
+        x_hat = self.decode_x(
+            z_flat,
+            y_original.expand(samples, -1, -1, -1, -1).reshape(samples * B, c, h, w),
+            u_rep,
+        )
+        x_hat = x_hat.view(samples, B, *x_hat.shape[1:])
 
-            # Move current batch to GPU
-            std_u = torch.exp(0.5 * logvar_u)
-            latent_u = std_u.size(1)
-            eps_u = torch.randn((current_batch_size, latent_u)).to(device)
-
-            u = mu_u + eps_u * std_u
-
-            if y.ndim == 3:
-                y_batch = y.unsqueeze(0)
-                y_batch = y_batch.expand(current_batch_size, -1, -1, -1)
-            elif y.ndim == 4 and y.size(0) == 1:
-                y_batch = y.expand(current_batch_size, -1, -1, -1)
+        if gamma_added:
+            gx = self.decoder_variance_x(z_flat)
+            if self.gamma_type == "scalar":
+                self.gammax = gx
             else:
-                y_batch = y
-
-            y_enc = self.y_to_z(y_batch).view(y_batch.size(0), -1)
-            u_enc = self.u_to_z(u).view(u.size(0), -1)
-
-            mu_z_uy, logvar_z_uy = self.z_cond(y_enc, u_enc)
-
-            # Generate samples_z samples for each u sample (vectorized)
-            std_z = torch.exp(0.5 * logvar_z_uy)
-            latent_z = std_z.size(1)
-
-            # Generate all random samples at once for current batch
-            eps_z = torch.randn((current_batch_size, samples_z, latent_z)).to(device)
-
-            # Expand mu and std for broadcasting
-            mu_z_expanded = mu_z_uy.unsqueeze(1).expand(-1, samples_z, -1)
-            std_z_expanded = std_z.unsqueeze(1).expand(-1, samples_z, -1)
-
-            # Sample z for all u samples at once
-            z = mu_z_expanded + eps_z * std_z_expanded
-            z = z.view(-1, latent_z)
-
-            y_expanded = y_enc.unsqueeze(1).expand(-1, samples_z, -1)
-            u_expanded = u_enc.unsqueeze(1).expand(-1, samples_z, -1)
-            y_flat = y_expanded.reshape(current_batch_size * samples_z, -1)
-            u_flat = u_expanded.reshape(current_batch_size * samples_z, -1)
-
-            # Decode on GPU
-            batch_output = self.decode_x(z, y, u_flat)
-
-            # Move to CPU only if samples > 5000
-            all_outputs.append(batch_output.to(cpu_device))
-
-            # Clear GPU cache only if using CPU offload
-            if use_cpu_offload:
-                del u, y_batch, y_enc, u_enc, mu_z_uy, logvar_z_uy, std_z, eps_z
-                del (
-                    mu_z_expanded,
-                    std_z_expanded,
-                    z,
-                    y_expanded,
-                    u_expanded,
-                    y_flat,
-                    u_flat,
-                    batch_output,
-                )
-                torch.cuda.empty_cache()
-
-        # Concatenate all results and move back to original device
-        final_output = torch.cat(all_outputs, dim=0).to(device)
-        return final_output
+                gammax = gx.view(samples, B, 4, h * 2, w * 2)
+                self.gammax = gammax
+            self.gamma = self.gammax
+            return self.sample_from_distribution(
+                x_hat, self.gammax, gamma_added=gamma_added
+            )
+        else:
+            return x_hat
 
     def train_step(self, batch, device):
         y, x = batch
@@ -541,7 +496,12 @@ class Multimodal_VAE(BaseVAE):
                 y, x = [t.to(device) for t in batch]
                 with torch.no_grad():
                     x_hat, y_hat, *_ = self.forward(x, y, L=1)
-                    x_sr = self.conditional_generation(y)
+                    # Use sample method for conditional generation with consistency
+                    x_sr_samples = self.sample(y, 100, gamma_added=False)
+                    if x_sr_samples.ndim == 5:
+                        x_sr = x_sr_samples.mean(dim=0)  # Average over samples
+                    else:
+                        x_sr = x_sr
 
                 b = y.size(0)
                 count += b
@@ -550,7 +510,6 @@ class Multimodal_VAE(BaseVAE):
                     ssim_y = self.ssim(
                         oy.cpu().numpy(),
                         ry.cpu().numpy(),
-                        win_size=11,
                         data_range=1.0,
                         channel_axis=0,
                     )
@@ -561,7 +520,6 @@ class Multimodal_VAE(BaseVAE):
                     ssim_x = self.ssim(
                         ox.cpu().numpy(),
                         rx.cpu().numpy(),
-                        win_size=11,
                         data_range=1.0,
                         channel_axis=0,
                     )
@@ -572,7 +530,6 @@ class Multimodal_VAE(BaseVAE):
                     ssim_sr = self.ssim(
                         ox.cpu().numpy(),
                         gen.cpu().numpy(),
-                        win_size=11,
                         data_range=1.0,
                         channel_axis=0,
                     )
@@ -671,7 +628,11 @@ class Multimodal_VAE(BaseVAE):
             y, x = [t.to(device) for t in batch]
             with torch.no_grad():
                 x_hat, y_hat, *_ = self.forward(x, y, L=1)
-                x_sr = self.conditional_generation(y)
+                x_sr_samples = self.sample(y, 100, gamma_added=False)
+                if x_sr_samples.ndim == 5:
+                    x_sr = x_sr_samples.mean(dim=0)
+                else:
+                    x_sr = x_sr_samples
 
             imgs = {
                 "y_hat": y_hat[:4, [2, 1, 0], :, :].clamp(0, 1),
@@ -729,11 +690,7 @@ class Multimodal_VAE(BaseVAE):
         if self.gamma_type == "scalar":
             self.gammax.requires_grad = True
             self.gammay.requires_grad = True
-            self.optimizer.add_param_group(
-                {
-                    "params": [self.gammax, self.gammay],
-                }
-            )
+
         device = next(self.parameters()).device
         val_loader = self.val_loader
         if val_loader is None:
@@ -759,9 +716,8 @@ class Multimodal_VAE(BaseVAE):
                 # Compute SSIM and LPIPS scores
                 for bcb, hr in zip(hr_interp, x_val):
                     ssim_val = self.ssim(
-                        hr.numpy(),
-                        bcb.numpy(),
-                        win_size=11,
+                        hr.cpu().numpy(),
+                        bcb.cpu().numpy(),
                         data_range=1.0,
                         channel_axis=0,
                     )

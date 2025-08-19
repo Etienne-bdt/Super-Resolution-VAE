@@ -13,7 +13,7 @@ from skimage import metrics as skmetrics
 from tqdm import tqdm
 
 from callbacks import Callback
-from utils import icp, quantile_map
+from utils import gaussian_sampling, icp, laplacian_sampling, quantile_map
 
 
 class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
@@ -298,6 +298,28 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
             "get_task_data must be implemented in the derived class."
         )
 
+    def sample_from_distribution(self, mean, variance, gamma_added=True):
+        """
+        Sample from the specified distribution (Laplacian or Gaussian).
+
+        Args:
+            mean (torch.Tensor): Mean of the distribution.
+            variance (torch.Tensor): Variance parameter (gamma).
+            gamma_added (bool): Whether to add noise or return mean.
+
+        Returns:
+            torch.Tensor: Sampled values.
+        """
+        if not gamma_added:
+            return mean
+
+        if self.distribution_type == "laplacian":
+            # For Laplacian: b = sqrt(variance/2), where variance = 2*b^2
+            return laplacian_sampling(mean, variance)
+        else:  # gaussian
+            # For Gaussian: sigma = sqrt(variance)
+            return gaussian_sampling(mean, variance)
+
     def task(self, val_loader):
         """
         Performs a test step on a batch.
@@ -312,15 +334,15 @@ class BaseVAE(nn.Module, metaclass=abc.ABCMeta):
         pred, target = self.get_task_data(val_loader)
 
         with torch.no_grad():
-            samples = self.sample(pred, gamma_added=True, recurrent=False)[
+            samples = self.sample(pred, gamma_added=False, recurrent=False)[
                 :, 0, :, :, :
             ]
-            if not hasattr(self, "gamma"):
-                _, _, _, self.gamma = self.forward(target, pred)
-            if self.gamma_type == "scalar":
-                gamma = self.gamma
-            else:
-                gamma = self.gamma[0, :, :, :].mean(0)
+            if self.gamma_type == "vector":
+                if not hasattr(self, "gamma"):
+                    _, _, _, self.gamma = self.forward(target, pred)
+                if self.gamma.ndim == 5:
+                    gamma = self.gamma.mean(dim=0)
+                gamma = gamma[0, :, :, :].mean(0)
                 normed_gamma = (gamma - gamma.min()) / (gamma.max() - gamma.min())
         # save_img_histogram(pred, f"{results_dir}/input_image_histogram.png")
         # save_img_histogram(target, f"{results_dir}/target_image_histogram.png")

@@ -13,7 +13,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 from dataset import init_dataloader
-from models import Cond_VAE
+from models import Cond_VAE, Multimodal_VAE
 from utils import save_img, save_img_histogram
 
 
@@ -415,7 +415,7 @@ def _plot_global_barchart(
 
 
 def sample_with_flags(
-    model: Cond_VAE,
+    model,  # Remove type hint since we now support both Cond_VAE and Multimodal_VAE
     y: torch.Tensor,
     samples: int,
     gamma_added_first: bool,
@@ -428,37 +428,46 @@ def sample_with_flags(
     """
     device = y.device
     with torch.no_grad():
-        mu, logvar = model.cond_prior(y).chunk(2, dim=1)
-        mu, logvar = model.conv_condmu(mu), model.conv_condlogvar(logvar)
-        _, _, h, w = y.shape
-        z = torch.randn(
-            samples, int(int(256 / (model.adjust * 2)) * 2 * h * w / 64), device=device
-        )
-        z = mu + torch.exp(0.5 * logvar) * z
-        gamma = model.decoder_variance(z)
-        # Store gamma on model for compatibility with downstream utils
-        model.gamma = gamma
-        if y.shape[0] == 1:
-            y_exp = y.expand(samples, -1, -1, -1)
+        if isinstance(model, Multimodal_VAE):
+            # MVAE has its own sample method
+            return model.sample(
+                y, samples=samples, gamma_added=gamma_added_first, recurrent=recurrent
+            )[:, 0, :, :, :]
         else:
-            y_exp = y
-        mean_decode = model.decode(z, y_exp)
-
-        if recurrent:
-            x_hat = model.sample_from_distribution(
-                mean_decode, gamma, gamma_added_first
-            ).clamp(0, 1)
-            # Recurrent pass through the full model
-            x_hat, *_ = model.forward(x_hat, y_exp)
-            # Optional second noise application
-            x_hat = model.sample_from_distribution(x_hat, gamma, gamma_added_second)
-            return x_hat.clamp(0, 1)
-        else:
-            # No recurrent pass, just decide whether to add first noise or not
-            x_hat = model.sample_from_distribution(
-                mean_decode, gamma, gamma_added_first
+            # Cond_VAE sampling logic
+            mu, logvar = model.cond_prior(y).chunk(2, dim=1)
+            mu, logvar = model.conv_condmu(mu), model.conv_condlogvar(logvar)
+            _, _, h, w = y.shape
+            z = torch.randn(
+                samples,
+                int(int(256 / (model.adjust * 2)) * 2 * h * w / 64),
+                device=device,
             )
-            return x_hat.clamp(0, 1)
+            z = mu + torch.exp(0.5 * logvar) * z
+            gamma = model.decoder_variance(z)
+            # Store gamma on model for compatibility with downstream utils
+            model.gamma = gamma
+            if y.shape[0] == 1:
+                y_exp = y.expand(samples, -1, -1, -1)
+            else:
+                y_exp = y
+            mean_decode = model.decode(z, y_exp)
+
+            if recurrent:
+                x_hat = model.sample_from_distribution(
+                    mean_decode, gamma, gamma_added_first
+                ).clamp(0, 1)
+                # Recurrent pass through the full model
+                x_hat, *_ = model.forward(x_hat, y_exp)
+                # Optional second noise application
+                x_hat = model.sample_from_distribution(x_hat, gamma, gamma_added_second)
+                return x_hat.clamp(0, 1)
+            else:
+                # No recurrent pass, just decide whether to add first noise or not
+                x_hat = model.sample_from_distribution(
+                    mean_decode, gamma, gamma_added_first
+                )
+                return x_hat.clamp(0, 1)
 
 
 @torch.no_grad()
@@ -481,7 +490,7 @@ def compute_bicubic_ssim(val_loader, device) -> np.ndarray:
 
 @torch.no_grad()
 def evaluate_config(
-    model: Cond_VAE,
+    model,  # Remove type hint since we now support both models
     val_loader,
     device,
     out_dir: str,
@@ -557,7 +566,6 @@ def evaluate_config(
             recurrent=recurrent,
             gamma_added_second=gamma_second,
         )
-        # out shape: (1, C, H, W)
         current_ssim = skimetrics.structural_similarity(
             out[0].cpu().numpy(),
             x[0].cpu().numpy(),
@@ -1018,19 +1026,29 @@ def evaluate_config(
 
 def load_model(
     ckpt_path: str,
-    distribution_type: str,
+    model_type: str,  # Change from distribution_type to model_type
     device: torch.device,
     cr: float = 1.5,
     patch_size: int = 256,
     gamma_type: str = "scalar",
-) -> Cond_VAE:
-    model = Cond_VAE(
-        cr=cr,
-        patch_size=patch_size,
-        gamma_type=gamma_type,
-        slurm_job_id=os.getenv("SLURM_JOB_ID", "local_run"),
-        distribution_type=distribution_type,
-    )
+    distribution_type: str = "laplacian",  # Add for Cond_VAE
+):
+    if model_type == "mvae":
+        model = Multimodal_VAE(
+            cr=cr,
+            patch_size=patch_size,
+            gamma_type=gamma_type,
+            slurm_job_id=os.getenv("SLURM_JOB_ID", "local_run"),
+        )
+    else:  # cond_vae
+        model = Cond_VAE(
+            cr=cr,
+            patch_size=patch_size,
+            gamma_type=gamma_type,
+            slurm_job_id=os.getenv("SLURM_JOB_ID", "local_run"),
+            distribution_type=distribution_type,
+        )
+
     ckpt = torch.load(ckpt_path, map_location="cpu")
     print(f"Loading checkpoint: {ckpt_path}")
     if isinstance(ckpt, dict) and "state_dict" in ckpt:
@@ -1043,7 +1061,7 @@ def load_model(
 
 
 def evaluate_model_grid(
-    model: Cond_VAE,
+    model,  # Remove type hint
     model_tag: str,
     val_loader,
     device,
@@ -1166,8 +1184,13 @@ def parse_args():
     parser.add_argument(
         "--gaussian_ckpt",
         type=str,
-        default="ckpt/3872913.pth",
         help="Path to Gaussian model checkpoint (optional)",
+    )
+    parser.add_argument(
+        "--mvae_ckpt",
+        type=str,
+        default="./ckpt/3873173.pth",
+        help="Path to MVAE model checkpoint (optional)",
     )
     parser.add_argument("--patch_size", type=int, default=256)
     parser.add_argument("--cr", type=float, default=1.5)
@@ -1199,10 +1222,11 @@ def main():
     if args.laplacian_ckpt is not None and os.path.exists(args.laplacian_ckpt):
         lap_model = load_model(
             args.laplacian_ckpt,
-            distribution_type="laplacian",
+            model_type="cond_vae",
             device=device,
             cr=args.cr,
             patch_size=args.patch_size,
+            distribution_type="laplacian",
         )
         lap_tag = f"Laplacian-{os.path.basename(args.laplacian_ckpt).split('.')[0]}"
         lap_out_dir = os.path.join(results_root, lap_tag)
@@ -1227,11 +1251,12 @@ def main():
         if os.path.exists(args.gaussian_ckpt):
             gau_model = load_model(
                 args.gaussian_ckpt,
-                distribution_type="gaussian",
+                model_type="cond_vae",
                 device=device,
                 cr=args.cr,
                 patch_size=args.patch_size,
                 gamma_type="vector",
+                distribution_type="gaussian",
             )
             gau_tag = f"Gaussian-{os.path.basename(args.gaussian_ckpt).split('.')[0]}"
             gau_out_dir = os.path.join(results_root, gau_tag)
@@ -1250,6 +1275,33 @@ def main():
             print(
                 f"Gaussian checkpoint not found: {args.gaussian_ckpt}. Skipping Gaussian model."
             )
+
+    # Evaluate MVAE model (optional)
+    if args.mvae_ckpt is not None:
+        if os.path.exists(args.mvae_ckpt):
+            mvae_model = load_model(
+                args.mvae_ckpt,
+                model_type="mvae",
+                device=device,
+                cr=args.cr,
+                patch_size=args.patch_size,
+                gamma_type="vector",
+            )
+            mvae_tag = f"MVAE-{os.path.basename(args.mvae_ckpt).split('.')[0]}"
+            mvae_out_dir = os.path.join(results_root, mvae_tag)
+            os.makedirs(mvae_out_dir, exist_ok=True)
+            evaluate_model_grid(
+                mvae_model,
+                mvae_tag,
+                val_loader,
+                device,
+                mvae_out_dir,
+                args.index_to_log,
+                bicubic_cache,
+            )
+            model_summaries.append((mvae_tag, mvae_out_dir))
+        else:
+            print(f"MVAE checkpoint not found: {args.mvae_ckpt}. Skipping MVAE model.")
 
     # Global barchart across models/configs
     try:

@@ -7,7 +7,6 @@ import wandb
 from tqdm import tqdm
 
 from loss import cond_loss
-from utils import laplacian_sampling, gaussian_sampling
 
 from .base import BaseVAE
 from .layers import conv_block, down_block, up_block
@@ -231,28 +230,6 @@ class Cond_VAE(BaseVAE):
         else:
             return self.variance_decoder(z)
 
-    def sample_from_distribution(self, mean, variance, gamma_added=True):
-        """
-        Sample from the specified distribution (Laplacian or Gaussian).
-        
-        Args:
-            mean (torch.Tensor): Mean of the distribution.
-            variance (torch.Tensor): Variance parameter (gamma).
-            gamma_added (bool): Whether to add noise or return mean.
-            
-        Returns:
-            torch.Tensor: Sampled values.
-        """
-        if not gamma_added:
-            return mean
-            
-        if self.distribution_type == "laplacian":
-            # For Laplacian: b = sqrt(variance/2), where variance = 2*b^2
-            return laplacian_sampling(mean, variance)
-        else:  # gaussian
-            # For Gaussian: sigma = sqrt(variance)
-            return gaussian_sampling(mean, variance)
-
     def forward(self, x, y, L=1):
         # Forward pass through the VAE
         mu, logvar = self.encode(x, y)
@@ -352,7 +329,7 @@ class Cond_VAE(BaseVAE):
                         x_hat = x_hat.mean(dim=0)
                     # Direct reconstruction from forward pass
                     x_hat_reconstruction, _, _, _ = self.forward(x, y)
-                
+
                 b = x.size(0)
                 total_pixels += b
 
@@ -366,7 +343,7 @@ class Cond_VAE(BaseVAE):
                         channel_axis=0,
                     )
                     total_ssim_pred += ssim_pred
-                    
+
                     # SSIM for direct reconstruction
                     ssim_reconstruction = self.ssim(
                         orig.cpu().numpy(),
@@ -375,12 +352,11 @@ class Cond_VAE(BaseVAE):
                         channel_axis=0,
                     )
                     total_ssim_reconstruction += ssim_reconstruction
-                    
+
                     # LPIPS using recurrent reconstruction
                     total_lpips += self.lpips_fn(
                         orig[[2, 1, 0]].unsqueeze(0), pred[[2, 1, 0]].unsqueeze(0)
                     ).item()
-
 
                 # capture first batch for image logging
                 if first_batch:
@@ -596,16 +572,23 @@ class Cond_VAE(BaseVAE):
 
         # Conditional prior
         mu_c, logvar_c = self.cond_prior(y).chunk(2, dim=1)
-        mu_c, logvar_c = self.conv_condmu(mu_c), self.conv_condlogvar(logvar_c)   # (B, latent_dim)
+        mu_c, logvar_c = (
+            self.conv_condmu(mu_c),
+            self.conv_condlogvar(logvar_c),
+        )  # (B, latent_dim)
         latent_dim = mu_c.size(1)
 
         # Sample z ~ N(mu_c, sigma_c)
         z = torch.randn(samples, B, latent_dim, device=device)
-        z = mu_c.unsqueeze(0) + torch.exp(0.5 * logvar_c).unsqueeze(0) * z        # (S,B,D)
+        z = mu_c.unsqueeze(0) + torch.exp(0.5 * logvar_c).unsqueeze(0) * z  # (S,B,D)
 
         # Flatten batch for decode
         z_flat = z.reshape(samples * B, latent_dim)
-        y_rep = y.unsqueeze(0).expand(samples, -1, -1, -1, -1).reshape(samples * B, *y.shape[1:])
+        y_rep = (
+            y.unsqueeze(0)
+            .expand(samples, -1, -1, -1, -1)
+            .reshape(samples * B, *y.shape[1:])
+        )
 
         mean = self.decode(z_flat, y_rep)  # (S*B, 4, H, W)
         mean = mean.view(samples, B, 4, self.patch_size, self.patch_size)
@@ -618,7 +601,9 @@ class Cond_VAE(BaseVAE):
             else:
                 g = self.decoder_variance(z_flat)  # (S*B, 4, H, W)
                 gamma = g.view(samples, B, 4, self.patch_size, self.patch_size)
-            mean_or_sample = self.sample_from_distribution(mean, gamma, gamma_added=True)
+            mean_or_sample = self.sample_from_distribution(
+                mean, gamma, gamma_added=True
+            )
         else:
             mean_or_sample = mean
 
@@ -626,12 +611,13 @@ class Cond_VAE(BaseVAE):
             # One refinement pass: treat each sample independently
             refined = []
             for s in range(samples):
-                x_in = mean_or_sample[s]            # (B,4,H,W)
+                x_in = mean_or_sample[s]  # (B,4,H,W)
                 x_ref, _, _, _ = self.forward(x_in, y, L=1)  # (B,4,H,W)
                 refined.append(x_ref)
             mean_or_sample = torch.stack(refined, dim=0)
 
         return mean_or_sample
+
 
 if __name__ == "__main__":
     model = Cond_VAE(cr=1.5, patch_size=64, distribution_type="laplacian")
