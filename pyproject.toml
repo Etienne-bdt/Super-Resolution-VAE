@@ -17,6 +17,7 @@ dependencies = [
     "tifffile>=2025.5.21",
     "torch==2.6.0",
     "tqdm>=4.67.1",
+    "transformers>=4.57.1",
     "wandb>=0.19.11",
 ]
 
