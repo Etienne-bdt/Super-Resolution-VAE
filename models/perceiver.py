@@ -3,6 +3,7 @@ import os
 import torch
 import torch.nn as nn
 import wandb
+from skimage import metrics as skmetrics
 from tqdm import tqdm
 from transformers.models.perceiver.modeling_perceiver import (
     PerceiverBasicDecoder,
@@ -10,7 +11,7 @@ from transformers.models.perceiver.modeling_perceiver import (
     PerceiverImagePreprocessor,
     PerceiverModel,
 )
-from skimage import metrics as skmetrics
+
 from dataset import init_dataloader
 
 
@@ -49,7 +50,7 @@ class PerceiverWrapper(nn.Module):
         )
 
     def forward(self, x):
-        return self.model(x).logits.view(-1, 4, self.configuration.image_size * 2, self.configuration.image_size * 2)
+        return self.model(x).logits.view(-1, self.configuration.image_size * 2, self.configuration.image_size * 2, 4).permute(0, 3, 1, 2)
 
 if __name__ == "__main__":
     model = PerceiverWrapper()
@@ -94,9 +95,9 @@ if __name__ == "__main__":
                     ssim_val = ssim(orig,recon,multichannel=True, channel_axis=0, data_range=1.0)
                     total_ssim += ssim_val
         ssim_val = total_ssim / len(val_loader.dataset)
-        wandb.log({"Reconstructed Images": [wandb.Image(outputs[i], caption=f"Reconstructed Image {i} Epoch {epoch+1}") for i in range(4)]}, step=epoch)
-        wandb.log({"Original Images": [wandb.Image(targets[i], caption=f"Original Image {i} Epoch {epoch+1}") for i in range(4)]}, step=epoch)
-        wandb.log({"Input Images": [wandb.Image(inputs[i], caption=f"Input Image {i} Epoch {epoch+1}") for i in range(4)]}, step=epoch)
+        wandb.log({"Reconstructed Images": [wandb.Image(outputs[i, [2,1,0],:,:], caption=f"Reconstructed Image {i} Epoch {epoch+1}") for i in range(4)]}, step=epoch)
+        wandb.log({"Original Images": [wandb.Image(targets[i, [2,1,0],:,:], caption=f"Original Image {i} Epoch {epoch+1}") for i in range(4)]}, step=epoch)
+        wandb.log({"Input Images": [wandb.Image(inputs[i, [2,1,0],:,:], caption=f"Input Image {i} Epoch {epoch+1}") for i in range(4)]}, step=epoch)
         wandb.log({"SSIM": ssim_val}, step=epoch)
         val_loss /= len(val_loader.dataset)
         print(f"Epoch {epoch+1}, Validation Loss: {val_loss:.4f}")
