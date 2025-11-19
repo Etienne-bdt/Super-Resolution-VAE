@@ -67,7 +67,7 @@ if __name__ == "__main__":
     for epoch in range(epochs):
         model.train()
         train_loss = 0.0
-        for batch in tqdm(train_loader, desc=f"Training Epoch {epoch+1}"):
+        """for batch in tqdm(train_loader, desc=f"Training Epoch {epoch+1}"):
             inputs, targets = batch
             inputs, targets = inputs.to(device), targets.to(device)
             optimizer.zero_grad()
@@ -79,7 +79,7 @@ if __name__ == "__main__":
         train_loss /= len(train_loader.dataset)
         wandb.log({"Training Loss": train_loss}, step=epoch)
         print(f"Epoch {epoch+1}, Training Loss: {train_loss:.4f}")
-
+        """
         for batch in tqdm(val_loader, desc=f"Validation Epoch {epoch+1}"):
             model.eval()
             val_loss = 0.0
@@ -94,6 +94,9 @@ if __name__ == "__main__":
                     ssim_val = ssim(orig,recon,multichannel=True, channel_axis=0, data_range=1.0)
                     total_ssim += ssim_val
         ssim_val = total_ssim / len(val_loader.dataset)
+        wandb.log({"Reconstructed Images": [wandb.Image(outputs[i], caption=f"Reconstructed Image {i} Epoch {epoch+1}") for i in range(4)]})
+        wandb.log({"Original Images": [wandb.Image(targets[i], caption=f"Original Image {i} Epoch {epoch+1}") for i in range(4)]})
+        wandb.log({"Input Images": [wandb.Image(inputs[i], caption=f"Input Image {i} Epoch {epoch+1}") for i in range(4)]})
         wandb.log({"SSIM": ssim_val}, step=epoch)
         val_loss /= len(val_loader.dataset)
         print(f"Epoch {epoch+1}, Validation Loss: {val_loss:.4f}")
