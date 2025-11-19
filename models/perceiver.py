@@ -57,12 +57,14 @@ if __name__ == "__main__":
     epoch = 100
     loss_fn = torch.nn.MSELoss()
     optimizer = torch.optim.Adam(model.model.parameters(), lr=1e-4)
-    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device) 
     for epoch in range(epoch):
         model.train()
         train_loss = 0.0
         for batch in tqdm(train_loader, desc=f"Training Epoch {epoch+1}"):
             inputs, targets = batch
+            inputs, targets = inputs.to(device), targets.to(device)
             optimizer.zero_grad()
             outputs = model(inputs)
             loss = loss_fn(outputs, targets)
@@ -77,6 +79,7 @@ if __name__ == "__main__":
             val_loss = 0.0
             with torch.no_grad():
                 inputs, targets = batch
+                inputs, targets = inputs.to(device), targets.to(device)
                 outputs = model(inputs)
                 loss = loss_fn(outputs, targets)
                 val_loss += loss.item() * inputs.size(0)
