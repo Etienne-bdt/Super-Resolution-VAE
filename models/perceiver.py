@@ -1,5 +1,8 @@
+import os
+
 import torch
 import torch.nn as nn
+import wandb
 from tqdm import tqdm
 from transformers.models.perceiver.modeling_perceiver import (
     PerceiverBasicDecoder,
@@ -7,7 +10,7 @@ from transformers.models.perceiver.modeling_perceiver import (
     PerceiverImagePreprocessor,
     PerceiverModel,
 )
-
+from skimage import metrics as skmetrics
 from dataset import init_dataloader
 
 
@@ -54,12 +57,14 @@ if __name__ == "__main__":
     train_loader, val_loader = init_dataloader(
         "s2v", batch_size=16, patch_size=128
     )
-    epoch = 100
+    ssim = skmetrics.structural_similarity
+    epochs = 100
     loss_fn = torch.nn.MSELoss()
     optimizer = torch.optim.Adam(model.model.parameters(), lr=1e-4)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device) 
-    for epoch in range(epoch):
+    model.to(device)
+    wandb_run = wandb.init(project="Perceiver-SR", name=f"SLURM_{os.getenv('SLURM_JOB_ID')}",entity="ebardet-isae-supaero")
+    for epoch in range(epochs):
         model.train()
         train_loss = 0.0
         for batch in tqdm(train_loader, desc=f"Training Epoch {epoch+1}"):
@@ -72,16 +77,25 @@ if __name__ == "__main__":
             optimizer.step()
             train_loss += loss.item() * inputs.size(0)
         train_loss /= len(train_loader.dataset)
+        wandb.log({"Training Loss": train_loss}, step=epoch)
         print(f"Epoch {epoch+1}, Training Loss: {train_loss:.4f}")
 
         for batch in tqdm(val_loader, desc=f"Validation Epoch {epoch+1}"):
             model.eval()
             val_loss = 0.0
+            total_ssim = 0.0
             with torch.no_grad():
                 inputs, targets = batch
                 inputs, targets = inputs.to(device), targets.to(device)
                 outputs = model(inputs)
                 loss = loss_fn(outputs, targets)
                 val_loss += loss.item() * inputs.size(0)
-            val_loss /= len(val_loader.dataset)
-            print(f"Epoch {epoch+1}, Validation Loss: {val_loss:.4f}")
+                for orig,recon in zip(targets.cpu().numpy(), outputs.cpu().numpy()):
+                    ssim_val = ssim(orig,recon,multichannel=True, channel_axis=0)
+                    total_ssim += ssim_val
+        ssim_val = total_ssim / len(val_loader.dataset)
+        wandb.log({"SSIM": ssim_val}, step=epoch)
+        val_loss /= len(val_loader.dataset)
+        print(f"Epoch {epoch+1}, Validation Loss: {val_loss:.4f}")
+        wandb.log({"Validation Loss": val_loss}, step=epoch)
+        
