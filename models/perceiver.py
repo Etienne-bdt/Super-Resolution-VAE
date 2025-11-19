@@ -91,7 +91,7 @@ if __name__ == "__main__":
                 loss = loss_fn(outputs, targets)
                 val_loss += loss.item() * inputs.size(0)
                 for orig,recon in zip(targets.cpu().numpy(), outputs.cpu().numpy()):
-                    ssim_val = ssim(orig,recon,multichannel=True, channel_axis=0)
+                    ssim_val = ssim(orig,recon,multichannel=True, channel_axis=0, data_range=1.0)
                     total_ssim += ssim_val
         ssim_val = total_ssim / len(val_loader.dataset)
         wandb.log({"SSIM": ssim_val}, step=epoch)
