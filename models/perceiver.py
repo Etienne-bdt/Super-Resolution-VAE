@@ -67,7 +67,7 @@ if __name__ == "__main__":
     for epoch in range(epochs):
         model.train()
         train_loss = 0.0
-        """for batch in tqdm(train_loader, desc=f"Training Epoch {epoch+1}"):
+        for batch in tqdm(train_loader, desc=f"Training Epoch {epoch+1}"):
             inputs, targets = batch
             inputs, targets = inputs.to(device), targets.to(device)
             optimizer.zero_grad()
@@ -79,7 +79,7 @@ if __name__ == "__main__":
         train_loss /= len(train_loader.dataset)
         wandb.log({"Training Loss": train_loss}, step=epoch)
         print(f"Epoch {epoch+1}, Training Loss: {train_loss:.4f}")
-        """
+        
         for batch in tqdm(val_loader, desc=f"Validation Epoch {epoch+1}"):
             model.eval()
             val_loss = 0.0
