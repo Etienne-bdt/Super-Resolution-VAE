@@ -14,7 +14,7 @@ from dataset import init_dataloader
 class PerceiverWrapper(nn.Module):
     def __init__(self):
         super(PerceiverWrapper, self).__init__()
-        self.configuration = PerceiverConfig(image_size=256)
+        self.configuration = PerceiverConfig(image_size=128)
         self.preprocessor = PerceiverImagePreprocessor(
             self.configuration,
             prep_type="conv1x1",
