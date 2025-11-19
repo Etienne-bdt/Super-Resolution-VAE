@@ -14,7 +14,7 @@ from dataset import init_dataloader
 class PerceiverWrapper(nn.Module):
     def __init__(self):
         super(PerceiverWrapper, self).__init__()
-        self.configuration = PerceiverConfig(image_size=128)
+        self.configuration = PerceiverConfig(image_size=64)
         self.preprocessor = PerceiverImagePreprocessor(
             self.configuration,
             prep_type="conv1x1",
@@ -52,7 +52,7 @@ if __name__ == "__main__":
     model = PerceiverWrapper()
     
     train_loader, val_loader = init_dataloader(
-        "s2v"
+        "s2v", batch_size=16, patch_size=128
     )
     epoch = 100
     loss_fn = torch.nn.MSELoss()
