@@ -46,7 +46,7 @@ class PerceiverWrapper(nn.Module):
         )
 
     def forward(self, x):
-        return self.model(x).logits
+        return self.model(x).logits.view(-1, 4, self.configuration.image_size * 2, self.configuration.image_size * 2)
 
 if __name__ == "__main__":
     model = PerceiverWrapper()
