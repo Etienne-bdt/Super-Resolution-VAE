@@ -26,4 +26,4 @@ jobs:
       - uses: actions/checkout@v4
       # You may pin to the exact commit or the version.
       # uses: dante-ev/latex-action@49cf7cb5f79e7b2006dbdffea85e02bec0b6244b
-      - uses: astral-sh/ruff-action@v3.5.0
+      - uses: astral-sh/ruff-action@v3.5.1
