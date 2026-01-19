@@ -17,7 +17,7 @@ jobs:
           - tests/test_env.py
     name: pytest – ${{ matrix.file }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Read Python version
         id: read_py
         run: |
